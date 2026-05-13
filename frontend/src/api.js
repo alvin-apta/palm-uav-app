@@ -1,4 +1,23 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
+const API_BASE_URL = resolvePublicUrl(import.meta.env.VITE_API_BASE_URL || "http://localhost:8080", "8090");
+
+function resolvePublicUrl(configuredUrl, publicPort) {
+  if (typeof window === "undefined") return configuredUrl;
+  const currentHost = window.location.hostname;
+  if (currentHost === "localhost" || currentHost === "127.0.0.1") return configuredUrl;
+
+  try {
+    const url = new URL(configuredUrl);
+    if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
+      url.hostname = currentHost;
+      url.port = publicPort;
+      return url.toString().replace(/\/$/, "");
+    }
+  } catch {
+    return configuredUrl;
+  }
+
+  return configuredUrl;
+}
 
 export function apiBaseUrl() {
   return API_BASE_URL;

@@ -1,10 +1,10 @@
-path: /workspace/datasets/palm_health
+path: /workspace/model_training/datasets/palm_health
 train: images/train
 val: images/val
+test: images/test
 
 names:
   0: healthy
   1: yellow_stressed
   2: small_young
   3: dead
-

@@ -8,6 +8,113 @@ const { useEffect, useMemo, useState } = React;
 const NAV = ["Home", "Missions", "Upload Imagery", "Stitching", "Map", "Prescriptions", "Reports", "Admin"];
 const HEALTH_OPTIONS = ["healthy", "small_young", "yellow_stressed", "dead"];
 const ACTIVE_STITCH_STATUSES = new Set(["queued", "running"]);
+const PHOTO_FILE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".tif", ".tiff"]);
+const QUICK_STITCH_DEFAULTS = {
+  mode: "quick",
+  resize_max_px: 1800,
+  max_concurrency: 2,
+  feature_quality: "medium",
+  orthophoto_resolution: 16,
+  split_batch_size: 0,
+  split_overlap: 0,
+  fast_orthophoto: true,
+  skip_3dmodel: true,
+  minimal_outputs: true,
+};
+const FINAL_STITCH_DEFAULTS = {
+  ...QUICK_STITCH_DEFAULTS,
+  mode: "final",
+  resize_max_px: 3072,
+  feature_quality: "high",
+  orthophoto_resolution: 10,
+  fast_orthophoto: false,
+};
+
+function photoFilePath(file) {
+  return file.webkitRelativePath || file.relativePath || file.name;
+}
+
+function isSupportedPhotoFile(file) {
+  const name = photoFilePath(file).toLowerCase();
+  const dotIndex = name.lastIndexOf(".");
+  return dotIndex >= 0 && PHOTO_FILE_EXTENSIONS.has(name.slice(dotIndex));
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes || 0);
+  if (value >= 1024 * 1024 * 1024) return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  if (value >= 1024) return `${Math.round(value / 1024)} KB`;
+  return `${value} B`;
+}
+
+function mergePhotoFiles(existing, incoming) {
+  const merged = [...existing];
+  const keys = new Set(existing.map((file) => `${photoFilePath(file)}:${file.size}:${file.lastModified}`));
+  for (const file of incoming) {
+    if (!isSupportedPhotoFile(file)) continue;
+    const key = `${photoFilePath(file)}:${file.size}:${file.lastModified}`;
+    if (keys.has(key)) continue;
+    keys.add(key);
+    merged.push(file);
+  }
+  return merged;
+}
+
+function fileFromEntry(entry) {
+  return new Promise((resolve, reject) => {
+    entry.file(
+      (file) => {
+        try {
+          Object.defineProperty(file, "relativePath", { value: entry.fullPath.replace(/^\//, ""), configurable: true });
+        } catch {
+          file.relativePath = entry.fullPath.replace(/^\//, "");
+        }
+        resolve(file);
+      },
+      reject,
+    );
+  });
+}
+
+function readDirectoryEntries(reader) {
+  return new Promise((resolve, reject) => {
+    const entries = [];
+    function readBatch() {
+      reader.readEntries(
+        (batch) => {
+          if (!batch.length) {
+            resolve(entries);
+            return;
+          }
+          entries.push(...batch);
+          readBatch();
+        },
+        reject,
+      );
+    }
+    readBatch();
+  });
+}
+
+async function filesFromEntry(entry) {
+  if (entry.isFile) return [await fileFromEntry(entry)];
+  if (!entry.isDirectory) return [];
+  const entries = await readDirectoryEntries(entry.createReader());
+  const nested = await Promise.all(entries.map(filesFromEntry));
+  return nested.flat();
+}
+
+async function filesFromDrop(dataTransfer) {
+  const itemEntries = [...(dataTransfer.items || [])]
+    .map((item) => item.webkitGetAsEntry?.())
+    .filter(Boolean);
+  if (itemEntries.length) {
+    const nested = await Promise.all(itemEntries.map(filesFromEntry));
+    return nested.flat();
+  }
+  return [...(dataTransfer.files || [])];
+}
 
 function humanize(value) {
   return String(value || "-").replaceAll("_", " ");
@@ -158,6 +265,8 @@ function App() {
   const [stitchPreviewCollapsed, setStitchPreviewCollapsed] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [selectedPhotoFiles, setSelectedPhotoFiles] = useState([]);
+  const [photoDropActive, setPhotoDropActive] = useState(false);
   const [stitchSubmitting, setStitchSubmitting] = useState(false);
   const [stitchRefreshing, setStitchRefreshing] = useState(false);
   const [qualityRefreshing, setQualityRefreshing] = useState(false);
@@ -173,18 +282,7 @@ function App() {
     analytics: false,
   });
   const [nowTick, setNowTick] = useState(Date.now());
-  const [stitchSettings, setStitchSettings] = useState({
-    mode: "partial",
-    resize_max_px: 2048,
-    max_concurrency: 1,
-    feature_quality: "medium",
-    orthophoto_resolution: 14,
-    split_batch_size: 30,
-    split_overlap: 10,
-    fast_orthophoto: true,
-    skip_3dmodel: true,
-    minimal_outputs: true,
-  });
+  const [stitchSettings, setStitchSettings] = useState(QUICK_STITCH_DEFAULTS);
   const [loginForm, setLoginForm] = useState({ email: "owner@example.com", password: "palmops123" });
 
   const currentBlockId = selectedBlock || blocks[0]?.id || "";
@@ -198,6 +296,7 @@ function App() {
     orthomosaicJobs.find((job) => job.status === "complete" && job.output_asset_id);
   const currentBlockInferenceJobs = jobs.filter((job) => job.block_id === currentBlockId);
   const latestInferenceJob = currentBlockInferenceJobs[0] || null;
+  const selectedPhotoTotalBytes = selectedPhotoFiles.reduce((total, file) => total + file.size, 0);
   const selectedCogAssetIds = useMemo(() => {
     if (!cogs.length) return [];
     if (selectedCogIds.includes("all")) return cogs.map((asset) => asset.id);
@@ -265,7 +364,7 @@ function App() {
     setCogs(cogRows);
     if (cogRows.length) {
       const validIds = selectedCogIds.filter((id) => id === "all" || cogRows.some((asset) => asset.id === id));
-      const nextIds = selectedCogIds.length === 0 ? [] : validIds.length ? validIds : ["all"];
+      const nextIds = selectedCogIds.length === 0 ? [cogRows[0].id] : validIds.length ? validIds : [cogRows[0].id];
       await loadCogSelection(nextIds, cogRows);
     } else {
       setSelectedCogIds([]);
@@ -376,6 +475,32 @@ function App() {
     setMessage("Mission saved");
   }
 
+  function addPhotoFiles(files) {
+    const supported = [...files].filter(isSupportedPhotoFile);
+    setSelectedPhotoFiles((current) => mergePhotoFiles(current, supported));
+    if (!supported.length) {
+      setMessage("Choose JPG, PNG, TIFF, or GeoTIFF photos");
+      return;
+    }
+    setMessage(`${supported.length} image file${supported.length === 1 ? "" : "s"} ready to upload`);
+  }
+
+  function handlePhotoInputChange(event) {
+    addPhotoFiles(event.target.files || []);
+    event.target.value = "";
+  }
+
+  async function handlePhotoDrop(event) {
+    event.preventDefault();
+    setPhotoDropActive(false);
+    try {
+      const files = await filesFromDrop(event.dataTransfer);
+      addPhotoFiles(files);
+    } catch (error) {
+      setMessage(`Could not read dropped files: ${error.message}`);
+    }
+  }
+
   async function uploadPhotos(event) {
     event.preventDefault();
     const formElement = event.currentTarget;
@@ -384,10 +509,14 @@ function App() {
       return;
     }
     const form = new FormData(formElement);
-    if (!form.getAll("files").some((file) => file instanceof File && file.size > 0)) {
+    if (!selectedPhotoFiles.length) {
       setMessage("Choose one or more image files before uploading");
       return;
     }
+    form.delete("files");
+    selectedPhotoFiles.forEach((file) => {
+      form.append("files", file, photoFilePath(file));
+    });
     if (!form.get("sensor_width_mm")) form.delete("sensor_width_mm");
     if (!form.get("focal_length_mm")) form.delete("focal_length_mm");
     form.set("block_id", currentBlockId);
@@ -401,6 +530,7 @@ function App() {
       });
       setMessage(`${result.length} photos uploaded`);
       formElement.reset();
+      setSelectedPhotoFiles([]);
       await loadStitchQuality();
       await loadMapData();
       setMessage(`${result.length} photos uploaded. Create a stitch job first; AI inference runs on the stitched orthomosaic.`);
@@ -472,6 +602,33 @@ function App() {
 
   function updateStitchMode(mode) {
     setStitchSettings((settings) => {
+      if (mode === "quick") {
+        return {
+          ...settings,
+          ...QUICK_STITCH_DEFAULTS,
+        };
+      }
+      if (mode === "final") {
+        return {
+          ...settings,
+          ...FINAL_STITCH_DEFAULTS,
+        };
+      }
+      if (mode === "partial") {
+        return {
+          ...settings,
+          mode,
+          resize_max_px: 2400,
+          max_concurrency: 1,
+          feature_quality: "medium",
+          orthophoto_resolution: 12,
+          split_batch_size: 60,
+          split_overlap: 20,
+          fast_orthophoto: false,
+          skip_3dmodel: true,
+          minimal_outputs: true,
+        };
+      }
       if (mode === "ultra_low") {
         return {
           ...settings,
@@ -487,26 +644,14 @@ function App() {
           minimal_outputs: true,
         };
       }
-      return {
-        ...settings,
-        mode,
-        resize_max_px: 2048,
-        max_concurrency: 1,
-        feature_quality: "medium",
-        orthophoto_resolution: 14,
-        split_batch_size: 30,
-        split_overlap: 10,
-        fast_orthophoto: true,
-        skip_3dmodel: true,
-        minimal_outputs: true,
-      };
+      return { ...settings, mode };
     });
   }
 
   function buildStitchOptions() {
     const options = {
       output: "orthomosaic_geotiff",
-      low_memory_preset: true,
+      low_memory_preset: stitchSettings.mode !== "final",
       cog: true,
       "max-concurrency": Number(stitchSettings.max_concurrency || 2),
       "feature-quality": stitchSettings.feature_quality,
@@ -515,7 +660,9 @@ function App() {
       "skip-3dmodel": Boolean(stitchSettings.skip_3dmodel),
       "skip-report": true,
     };
-    options.resize_max_px = Number(stitchSettings.resize_max_px || 2048);
+    if (Number(stitchSettings.resize_max_px || 0) > 0) {
+      options.resize_max_px = Number(stitchSettings.resize_max_px);
+    }
     if (stitchSettings.minimal_outputs) {
       options.gltf = false;
       options["pc-ept"] = false;
@@ -850,7 +997,43 @@ function App() {
               <h2>Upload Photos</h2>
               <label>Sensor width mm optional<input name="sensor_width_mm" type="number" step="0.01" placeholder="Optional for GSD" /></label>
               <label>Focal length mm optional<input name="focal_length_mm" type="number" step="0.01" placeholder="Read from EXIF when available" /></label>
-              <label className="wide file-input">Photos<input name="files" type="file" multiple accept=".jpg,.jpeg,.png,.tif,.tiff" /></label>
+              <div
+                className={`wide upload-dropzone ${photoDropActive ? "is-active" : ""}`}
+                onDragEnter={(event) => {
+                  event.preventDefault();
+                  setPhotoDropActive(true);
+                }}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  setPhotoDropActive(true);
+                }}
+                onDragLeave={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget)) setPhotoDropActive(false);
+                }}
+                onDrop={handlePhotoDrop}
+              >
+                <strong>Drop photos or folders here</strong>
+                <span>JPG, PNG, TIFF, and GeoTIFF files are accepted.</span>
+                <div className="upload-picker-row">
+                  <label className="file-input">Choose files<input type="file" multiple accept=".jpg,.jpeg,.png,.tif,.tiff" onChange={handlePhotoInputChange} /></label>
+                  <label className="file-input">Choose folder<input type="file" multiple webkitdirectory="" directory="" onChange={handlePhotoInputChange} /></label>
+                </div>
+              </div>
+              {!!selectedPhotoFiles.length && (
+                <div className="wide selected-files">
+                  <div className="selected-files-head">
+                    <strong>{selectedPhotoFiles.length} files selected</strong>
+                    <span>{formatBytes(selectedPhotoTotalBytes)}</span>
+                    <button type="button" className="secondary-action" onClick={() => setSelectedPhotoFiles([])}>Clear</button>
+                  </div>
+                  <div className="selected-files-list">
+                    {selectedPhotoFiles.slice(0, 8).map((file) => (
+                      <span key={`${photoFilePath(file)}:${file.size}:${file.lastModified}`}>{photoFilePath(file)}</span>
+                    ))}
+                    {selectedPhotoFiles.length > 8 && <span>{selectedPhotoFiles.length - 8} more files</span>}
+                  </div>
+                </div>
+              )}
               <button disabled={isUploading}>{isUploading ? `Uploading ${uploadProgress}%` : "Upload Photos"}</button>
               {isUploading && (
                 <div className="wide upload-progress">
@@ -882,8 +1065,10 @@ function App() {
                 <div className="stitch-options">
                   <label>Memory mode
                     <select value={stitchSettings.mode} onChange={(event) => updateStitchMode(event.target.value)}>
-                      <option value="partial">Downsize + batch</option>
-                      <option value="ultra_low">Ultra low batch</option>
+                      <option value="quick">Quick unified</option>
+                      <option value="final">High quality unified</option>
+                      <option value="partial">Low memory batch</option>
+                      <option value="ultra_low">Emergency batch</option>
                     </select>
                   </label>
                   <label>Resize long edge px
@@ -955,8 +1140,8 @@ function App() {
                   </label>
                 </div>
                 <div className="setup-note setup-note-blue">
-                  <strong>Low-memory output plan</strong>
-                  <span>Stitching now always downsizes temporary copies and runs in batches. Increase batch size or overlap when the output becomes too fragmented.</span>
+                  <strong>Quick review plan</strong>
+                  <span>Quick unified creates one downsampled mosaic for cleaner color and no batch stacking. Use High quality unified for final export, or batch modes only when memory prevents a unified run.</span>
                 </div>
                 <div className="quality-grid">
                   <article><span>Photos</span><strong>{stitchQuality?.image_count ?? 0}</strong></article>
@@ -1093,7 +1278,7 @@ function App() {
                 <div className="overlay-list">
                   <label className="overlay-check">
                     <input type="checkbox" checked={selectedCogIds.includes("all")} onChange={(event) => toggleCog("all", event.target.checked)} />
-                    <span>All completed overlays</span>
+                    <span>All overlays for comparison</span>
                   </label>
                   {cogs.map((asset) => (
                     <label className="overlay-check" key={asset.id}>

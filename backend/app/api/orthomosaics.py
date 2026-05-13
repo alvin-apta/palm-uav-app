@@ -66,6 +66,7 @@ async def create_orthomosaic_job(
         raise HTTPException(status_code=400, detail="No photo assets found for stitching")
     assets, selection_note = (available_assets, "") if payload.asset_ids else _default_stitch_assets(available_assets)
 
+    payload.options = _default_job_options(payload.options)
     quality = assess_orthomosaic_readiness(assets)
     if selection_note:
         quality["available_image_count"] = len(available_assets)
@@ -153,6 +154,29 @@ def _default_stitch_assets(assets: list[ImageryAsset]) -> tuple[list[ImageryAsse
         "to avoid stitching mixed-resolution image sets."
     )
     return sorted(selected, key=_stitch_asset_sort_key), note
+
+
+def _default_job_options(options: dict | None) -> dict:
+    defaults = {
+        "output": "orthomosaic_geotiff",
+        "low_memory_preset": True,
+        "cog": True,
+        "max-concurrency": 2,
+        "feature-quality": "medium",
+        "orthophoto-resolution": 16,
+        "fast-orthophoto": True,
+        "skip-3dmodel": True,
+        "skip-report": True,
+        "gltf": False,
+        "pc-ept": False,
+        "3d-tiles": False,
+        "dsm": False,
+        "dtm": False,
+        "resize_max_px": 1800,
+        "split_batch_size": 0,
+        "split_overlap": 0,
+    }
+    return {**defaults, **(options or {})}
 
 
 def _stitch_asset_sort_key(asset: ImageryAsset) -> tuple:

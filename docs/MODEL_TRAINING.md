@@ -17,6 +17,51 @@ models/palm_health.pt
 
 The included model is a starter model for pipeline testing. Its confidence may be low on new orthomosaics. Treat results as review candidates until you train with your own labeled plantation imagery.
 
+## Train With Local Labels
+
+Create or export a YOLO detection dataset:
+
+```text
+model_training/datasets/palm_health/
+  images/train/
+  images/val/
+  labels/train/
+  labels/val/
+```
+
+Use the app class order exactly:
+
+```text
+0 healthy
+1 yellow_stressed
+2 small_young
+3 dead
+```
+
+Validate the dataset before training:
+
+```powershell
+docker compose exec api python /workspace/model_training/train_palm_health.py --validate-only
+```
+
+Train a stronger local model and replace `models/palm_health.pt`:
+
+```powershell
+docker compose exec api python /workspace/model_training/train_palm_health.py --base-model yolov8s.pt --epochs 120 --imgsz 960 --batch auto --device 0
+```
+
+CPU-only fallback:
+
+```powershell
+docker compose exec api python /workspace/model_training/train_palm_health.py --base-model yolov8n.pt --epochs 30 --imgsz 640 --batch 4 --device cpu
+```
+
+Restart inference services after training:
+
+```powershell
+docker compose restart api worker
+```
+
 ## Train With Roboflow Dataset
 
 Set your Roboflow key in `.env`:
@@ -57,11 +102,11 @@ Use block-specific validation sets so accuracy reflects field reality.
 `.env.example` includes:
 
 ```text
-YOLO_CONFIDENCE=0.01
+YOLO_CONFIDENCE=0.25
 YOLO_IOU=0.45
 ```
 
-The low confidence exists because the starter model is weak on some orthomosaic outputs. Increase this after training a stronger model.
+Use `0.25` as the starting threshold for a usable model. Lower it only if the model misses many palms; raise it if the map shows too many false positives.
 
 ## Quality Targets
 

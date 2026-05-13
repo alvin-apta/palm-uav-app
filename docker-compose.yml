@@ -36,6 +36,7 @@ services:
     volumes:
       - ./backend:/app
       - ./scripts:/scripts
+      - ./model_training:/workspace/model_training
       - ./data:/data
       - ./models:/models
     depends_on:
@@ -53,6 +54,7 @@ services:
     volumes:
       - ./backend:/app
       - ./scripts:/scripts
+      - ./model_training:/workspace/model_training
       - ./data:/data
       - ./models:/models
     depends_on:

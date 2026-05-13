@@ -1,0 +1,97 @@
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: palmops
+      POSTGRES_USER: palmops
+      POSTGRES_PASSWORD: palmops
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgis_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U palmops -d palmops"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: ./backend
+    env_file:
+      - .env
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+    ports:
+      - "8090:8080"
+    volumes:
+      - ./backend:/app
+      - ./scripts:/scripts
+      - ./data:/data
+      - ./models:/models
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ./backend
+    env_file:
+      - .env
+    command: arq app.worker.settings.WorkerSettings
+    volumes:
+      - ./backend:/app
+      - ./scripts:/scripts
+      - ./data:/data
+      - ./models:/models
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  nodeodm:
+    image: opendronemap/nodeodm
+    ports:
+      - "3000:3000"
+    volumes:
+      - nodeodm_data:/var/www/data
+
+  titiler:
+    image: python:3.12-slim
+    command: sh -c "apt-get update && apt-get install -y --no-install-recommends libexpat1 && rm -rf /var/lib/apt/lists/* && pip install --no-cache-dir uvicorn titiler.application && uvicorn titiler.application.main:app --host 0.0.0.0 --port 8081"
+    ports:
+      - "8082:8081"
+    volumes:
+      - ./data:/data:ro
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      VITE_API_BASE_URL: http://localhost:8090
+      VITE_TITILER_BASE_URL: http://localhost:8082
+    command: npm run dev -- --host 0.0.0.0 --port 5173
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    depends_on:
+      - api
+
+volumes:
+  postgis_data:
+  frontend_node_modules:
+  nodeodm_data:

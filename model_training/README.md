@@ -33,10 +33,22 @@ All coordinates are normalized from `0` to `1`.
 
 ## Training
 
-Run inside an environment with `ultralytics` installed:
+Validate the local labeled dataset:
 
 ```powershell
-python model_training/train_palm_health.py
+docker compose exec api python /workspace/model_training/train_palm_health.py --validate-only
+```
+
+Train locally and replace the app model:
+
+```powershell
+docker compose exec api python /workspace/model_training/train_palm_health.py --base-model yolov8s.pt --epochs 120 --imgsz 960 --batch auto --device 0
+```
+
+For CPU-only training, use a smaller run:
+
+```powershell
+docker compose exec api python /workspace/model_training/train_palm_health.py --base-model yolov8n.pt --epochs 30 --imgsz 640 --batch 4 --device cpu
 ```
 
 The script writes:
@@ -54,4 +66,3 @@ That file is mounted into the Docker worker at:
 ## Important
 
 The app intentionally does not create fake model weights. If `models/palm_health.pt` is missing, inference jobs fail with `model_not_configured`.
-

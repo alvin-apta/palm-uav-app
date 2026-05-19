@@ -44,8 +44,12 @@ class Settings(BaseSettings):
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:8080",
+        "https://apta.works",
     ]
-    allowed_origin_regex: str = r"http://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+)(:\d+)?"
+    allowed_origin_regex: str = (
+        r"^(https://([a-z0-9-]+\.)?apta\.works|"
+        r"http://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+)(:\d+)?)$"
+    )
 
     @property
     def upload_dir(self) -> Path:

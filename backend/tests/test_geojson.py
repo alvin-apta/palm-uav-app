@@ -12,8 +12,7 @@ def test_polygon_geojson_to_wkt() -> None:
 
 
 def test_feature_collection() -> None:
-    feature = point_feature(101.0, 0.5, {"health_class": "healthy"})
+    feature = point_feature(101.0, 0.5, {"health_class": "medium_canopy"})
     collection = feature_collection([feature])
     assert collection["type"] == "FeatureCollection"
     assert collection["features"][0]["geometry"]["coordinates"] == [101.0, 0.5]
-

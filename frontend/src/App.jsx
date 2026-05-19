@@ -6,7 +6,7 @@ import "./styles.css";
 
 const { useEffect, useMemo, useState } = React;
 const NAV = ["Home", "Missions", "Upload Imagery", "Stitching", "Map", "Prescriptions", "Reports", "Admin"];
-const HEALTH_OPTIONS = ["healthy", "small_young", "yellow_stressed", "dead"];
+const CANOPY_OPTIONS = ["small_canopy", "medium_canopy", "large_canopy"];
 const ACTIVE_STITCH_STATUSES = new Set(["queued", "running"]);
 const PHOTO_FILE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".tif", ".tiff"]);
 const QUICK_STITCH_DEFAULTS = {
@@ -259,7 +259,7 @@ function App() {
   const [cogBoundsList, setCogBoundsList] = useState([]);
   const [selectedCogIds, setSelectedCogIds] = useState(["all"]);
   const [showDetectionBoxes, setShowDetectionBoxes] = useState(true);
-  const [selectedDetectionClasses, setSelectedDetectionClasses] = useState(HEALTH_OPTIONS);
+  const [selectedDetectionClasses, setSelectedDetectionClasses] = useState(CANOPY_OPTIONS);
   const [mapZoomRequest, setMapZoomRequest] = useState(0);
   const [locateRequest, setLocateRequest] = useState(0);
   const [selectedBlock, setSelectedBlock] = useState("");
@@ -292,7 +292,6 @@ function App() {
 
   const currentBlockId = selectedBlock || blocks[0]?.id || "";
   const treeCount = trees.features?.length || 0;
-  const unhealthyCount = trees.features?.filter((feature) => ["yellow_stressed", "dead"].includes(feature.properties?.health_class)).length || 0;
   const blockOrthomosaicJobs = orthomosaicJobs.filter((job) => job.block_id === currentBlockId);
   const latestBlockStitchJob = blockOrthomosaicJobs[0] || null;
   const hasActiveStitchJob = blockOrthomosaicJobs.some((job) => ACTIVE_STITCH_STATUSES.has(job.status));
@@ -316,7 +315,7 @@ function App() {
   );
   const detectionClassTotals = useMemo(
     () =>
-      HEALTH_OPTIONS.reduce((totals, className) => {
+      CANOPY_OPTIONS.reduce((totals, className) => {
         totals[className] = (overlayFilteredDetections.features || []).filter(
           (feature) => feature.properties?.health_class === className
         ).length;
@@ -905,17 +904,17 @@ function App() {
     () => [
       ["Blocks", blocks.length],
       ["Trees on map", treeCount],
-      ["Unhealthy", unhealthyCount],
+      ["Small canopies", summary?.small_canopy_count ?? 0],
       ["Jobs", jobs.length + orthomosaicJobs.length],
     ],
-    [blocks.length, treeCount, unhealthyCount, jobs.length, orthomosaicJobs.length]
+    [blocks.length, treeCount, summary, jobs.length, orthomosaicJobs.length]
   );
   const mapAnalyticsCards = useMemo(
     () => [
       ["Palms", summary?.population_count ?? treeCount],
-      ["Unhealthy", summary?.unhealthy_count ?? unhealthyCount],
-      ["Dead", summary?.dead_count ?? 0],
-      ["Young", summary?.young_count ?? 0],
+      ["Small", summary?.small_canopy_count ?? 0],
+      ["Medium", summary?.medium_canopy_count ?? 0],
+      ["Large", summary?.large_canopy_count ?? 0],
       ["GPS", formatMetric(summary?.imagery?.gps_coverage_pct, "%")],
       ["Layers", summary?.imagery?.map_layers ?? cogs.length],
       ["Boxes", detectionCount],
@@ -924,7 +923,7 @@ function App() {
       ["AI", humanize(summary?.inference?.latest_status || "not_started")],
       ["FFB kg", formatMetric(summary?.estimated_total_ffb_kg)],
     ],
-    [summary, treeCount, unhealthyCount, cogs.length, detectionCount]
+    [summary, treeCount, cogs.length, detectionCount]
   );
 
   if (!token || !user) {
@@ -933,7 +932,7 @@ function App() {
         <form className="login-card" onSubmit={handleLogin}>
           <img className="login-logo" src="/palmops-icon.png" alt="" />
           <span className="eyebrow">PalmOps Web-GIS</span>
-          <h1>Sign in to monitor plantation health.</h1>
+          <h1>Sign in to monitor plantation canopies.</h1>
           <label>Email<input value={loginForm.email} onChange={(event) => setLoginForm({ ...loginForm, email: event.target.value })} /></label>
           <label>Password<input type="password" value={loginForm.password} onChange={(event) => setLoginForm({ ...loginForm, password: event.target.value })} /></label>
           <button type="submit">Sign In</button>
@@ -965,7 +964,7 @@ function App() {
           <section className="home-grid">
             <div className="hero">
               <span className="eyebrow">Drone to field action</span>
-              <h2>Count palms, classify health, stream maps, and export prescription files.</h2>
+              <h2>Count palms, classify canopy size, stream maps, and export prescription files.</h2>
               <p>Follow the workflow from mission setup to imagery upload, queued AI inference, map review, analytics, and VRT-ready exports.</p>
               <div className="button-row"><button onClick={() => setActive("Missions")}>Start Mission</button><button onClick={() => setActive("Upload Imagery")}>Upload Photos</button></div>
               <img className="hero-logo" src="/palmops-home-logo.png" alt="" />
@@ -1299,14 +1298,14 @@ function App() {
                   {!cogs.length && <p>No orthomosaic overlays yet.</p>}
                 </div>
               </CollapseCard>
-              <CollapseCard title="Detection boxes" meta={detectionCount} open={mapSections.detections} onToggle={() => toggleMapSection("detections")}>
+              <CollapseCard title="Canopy boxes" meta={detectionCount} open={mapSections.detections} onToggle={() => toggleMapSection("detections")}>
                 <div className="overlay-list">
                   <label className="overlay-check">
                     <input type="checkbox" checked={showDetectionBoxes} onChange={(event) => setShowDetectionBoxes(event.target.checked)} />
                     <span>Show bounding boxes</span>
                   </label>
                   <div className="class-filter-grid">
-                    {HEALTH_OPTIONS.map((item) => (
+                    {CANOPY_OPTIONS.map((item) => (
                       <label className="overlay-check class-check" key={item}>
                         <input
                           type="checkbox"
@@ -1318,7 +1317,7 @@ function App() {
                     ))}
                   </div>
                   <div className="class-total-grid">
-                    {HEALTH_OPTIONS.map((item) => (
+                    {CANOPY_OPTIONS.map((item) => (
                       <article key={item}>
                         <span>{humanize(item)}</span>
                         <strong>{selectedDetectionClasses.includes(item) ? detectionClassTotals[item] || 0 : 0}</strong>

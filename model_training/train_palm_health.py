@@ -11,11 +11,11 @@ from ultralytics import YOLO
 ROOT = Path(__file__).resolve().parent
 DEFAULT_DATASET_YAML = ROOT / "palm_health.yaml"
 DEFAULT_OUTPUT_WEIGHTS = ROOT.parent / "models" / "palm_health.pt"
-REQUIRED_NAMES = ["healthy", "yellow_stressed", "small_young", "dead"]
+REQUIRED_NAMES = ["palm_canopy"]
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train the PalmOps palm-health YOLO detector locally.")
+    parser = argparse.ArgumentParser(description="Train the PalmOps palm-canopy YOLO detector locally.")
     parser.add_argument("--data", default=str(DEFAULT_DATASET_YAML), help="YOLO dataset YAML.")
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT_WEIGHTS), help="Destination .pt used by the app.")
     parser.add_argument("--base-model", default="yolov8s.pt", help="Use yolov8s.pt or yolov8m.pt for better accuracy.")
@@ -128,7 +128,7 @@ def validate_label_files(label_dir: Path) -> None:
                 raise ValueError(f"{label_path}:{line_number} must have 5 YOLO values")
             class_id = int(float(parts[0]))
             if class_id < 0 or class_id >= len(REQUIRED_NAMES):
-                raise ValueError(f"{label_path}:{line_number} class id {class_id} is outside 0-3")
+                raise ValueError(f"{label_path}:{line_number} class id {class_id} is outside 0-{len(REQUIRED_NAMES) - 1}")
             for value in parts[1:]:
                 parsed = float(value)
                 if parsed < 0 or parsed > 1:

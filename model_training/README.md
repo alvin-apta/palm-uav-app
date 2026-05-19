@@ -1,4 +1,4 @@
-# Palm Health YOLO Training
+# Palm Canopy YOLO Training
 
 This folder is the honest model creation path for `palm_health.pt`.
 
@@ -25,11 +25,10 @@ All coordinates are normalized from `0` to `1`.
 ## Classes
 
 ```text
-0 healthy
-1 yellow_stressed
-2 small_young
-3 dead
+0 palm_canopy
 ```
+
+The app no longer trusts model classes for health status. YOLO only needs to find palm canopies; PalmOps then classifies each detected canopy as small, medium, or large from measured canopy diameter.
 
 ## Training
 

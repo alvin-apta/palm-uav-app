@@ -1172,20 +1172,16 @@ nav button:hover {
   background: var(--accent);
 }
 
-.class-dot.status-healthy {
-  background: var(--green);
-}
-
-.class-dot.status-small_young {
+.class-dot.status-small_canopy {
   background: #eab308;
 }
 
-.class-dot.status-yellow_stressed {
-  background: #f97316;
+.class-dot.status-medium_canopy {
+  background: var(--green);
 }
 
-.class-dot.status-dead {
-  background: var(--red);
+.class-dot.status-large_canopy {
+  background: #2563eb;
 }
 
 .class-filter-grid {

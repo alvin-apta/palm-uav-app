@@ -20,18 +20,29 @@ from app.services.analytics import calculate_gsd, calculate_vari, equivalent_dia
 from app.services.dedup import deduplicate_job
 from app.services.georef import pixel_to_geo
 
-REQUIRED_CLASSES = {"healthy", "yellow_stressed", "small_young", "dead"}
+CANOPY_CLASSES = {"small_canopy", "medium_canopy", "large_canopy"}
 Image.MAX_IMAGE_PIXELS = None
 ROBOFLOW_CLASS_MAP = {
-    "healthy": "healthy",
-    "yellow": "yellow_stressed",
-    "yellow_stressed": "yellow_stressed",
-    "small": "small_young",
-    "small_young": "small_young",
-    "dead": "dead",
+    "5": True,
+    "grass": False,
+    "palm": True,
+    "palm_canopy": True,
+    "healthy": True,
+    "healthy_palm": True,
+    "yellow": True,
+    "yellow_stressed": True,
+    "small": True,
+    "small_young": True,
+    "immature": True,
+    "stressed": True,
+    "dead": True,
+    "dead_palm": True,
+    "unhealthy": True,
 }
 OVERLAP_SUPPRESSION_IOU = 0.5
 OVERLAP_SUPPRESSION_CENTER_RATIO = 0.25
+SMALL_CANOPY_DIAMETER_M = 6.0
+LARGE_CANOPY_DIAMETER_M = 10.0
 
 
 def _fail_job(job: InferenceJob, code: str, message: str) -> None:
@@ -62,9 +73,9 @@ def _friendly_inference_error(code: str, message: str) -> str:
 
 def _recommended_inference_action(code: str) -> str:
     if code == "model_not_configured":
-        return "Place trained YOLO palm-health weights at /models/palm_health.pt, then run inference again."
+        return "Place trained YOLO palm canopy weights at /models/palm_health.pt, then run inference again."
     if code == "model_load_failed":
-        return "Check that the model has classes: healthy, yellow_stressed, small_young, dead."
+        return "Check that the model can detect palm tree canopies."
     if code == "orthomosaic_not_georeferenced":
         return "Recreate the stitch job from original GPS-tagged photos, add GCP/RTK control, or upload a georeferenced COG before running inference."
     return "Check the job error and retry after fixing the input or model configuration."
@@ -83,20 +94,35 @@ def _load_model(weights_path: str):
         raise FileNotFoundError(f"Model weights not found: {weights_path}")
     from ultralytics import YOLO  # Imported lazily so API can run without GPU/model deps.
 
-    model = YOLO(str(path))
-    names = set(model.names.values() if isinstance(model.names, dict) else model.names)
-    missing = REQUIRED_CLASSES - names
-    if missing:
-        raise ValueError(f"Model is missing required classes: {', '.join(sorted(missing))}")
-    return model
+    return YOLO(str(path))
 
 
-def _class_to_health(class_name: str) -> HealthClass | None:
+def _is_palm_detection_class(class_name: str) -> bool:
     normalized = class_name.strip().lower().replace(" ", "_").replace("-", "_")
-    mapped = ROBOFLOW_CLASS_MAP.get(normalized)
-    if not mapped:
-        return None
-    return HealthClass(mapped)
+    return ROBOFLOW_CLASS_MAP.get(normalized, True)
+
+
+def _classify_canopy_size(
+    diameter_m: float | None,
+    box_width: float,
+    box_height: float,
+    image_width: int | float | None,
+    image_height: int | float | None,
+) -> HealthClass:
+    if diameter_m is not None:
+        if diameter_m < SMALL_CANOPY_DIAMETER_M:
+            return HealthClass.small_canopy
+        if diameter_m >= LARGE_CANOPY_DIAMETER_M:
+            return HealthClass.large_canopy
+        return HealthClass.medium_canopy
+
+    image_short_side = min(float(image_width or 0.0), float(image_height or 0.0))
+    relative_size = max(float(box_width or 0.0), float(box_height or 0.0)) / image_short_side if image_short_side else 0.0
+    if relative_size and relative_size < 0.045:
+        return HealthClass.small_canopy
+    if relative_size >= 0.085:
+        return HealthClass.large_canopy
+    return HealthClass.medium_canopy
 
 
 def _bbox_center_xy(box_xyxy: list[float]) -> tuple[float, float, float, float, float, float]:
@@ -306,8 +332,7 @@ def _run_model_on_asset(
             cls_index = int(box.cls[0].item())
             confidence = float(box.conf[0].item())
             class_name = str(result.names[cls_index])
-            health_class = _class_to_health(class_name)
-            if health_class is None:
+            if not _is_palm_detection_class(class_name):
                 continue
             x_center, y_center, x, y, width, height = _bbox_center_xy(box.xyxy[0].tolist())
             lat, lon = pixel_to_geo(
@@ -326,6 +351,7 @@ def _run_model_on_asset(
                 gsd = calculate_gsd(asset.altitude_m, asset.sensor_width_mm, asset.focal_length_mm, asset.width_px)
             canopy_area = (width * height * gsd * gsd) if gsd else None
             diameter = equivalent_diameter(canopy_area)
+            health_class = _classify_canopy_size(diameter, width, height, asset.width_px, asset.height_px)
             vari = _patch_vari(image_path, x, y, width, height)
             detection = DetectionRaw(
                 job_id=job.id,
@@ -403,8 +429,7 @@ def _run_model_on_cog(
                         cls_index = int(box.cls[0].item())
                         confidence = float(box.conf[0].item())
                         class_name = str(result.names[cls_index])
-                        health_class = _class_to_health(class_name)
-                        if health_class is None:
+                        if not _is_palm_detection_class(class_name):
                             continue
                         local_x_center, local_y_center, local_x, local_y, box_width, box_height = _bbox_center_xy(
                             box.xyxy[0].tolist()
@@ -416,6 +441,7 @@ def _run_model_on_cog(
                         lat, lon = _pixel_to_wgs84(georef, global_x_center, global_y_center)
                         canopy_area = (box_width * box_height * pixel_area_m2) if pixel_area_m2 else None
                         diameter = equivalent_diameter(canopy_area)
+                        health_class = _classify_canopy_size(diameter, box_width, box_height, width, height)
                         vari = _patch_vari_from_image(crop, local_x, local_y, box_width, box_height)
                         bbox_geojson = _bbox_geojson(georef, global_x, global_y, box_width, box_height)
                         detections.append(
@@ -496,8 +522,7 @@ def _run_roboflow_on_asset(model_id: str, asset: ImageryAsset, job: InferenceJob
     payload = response.json()
     detections: list[DetectionRaw] = []
     for prediction in payload.get("predictions", []):
-        health_class = _class_to_health(str(prediction.get("class", "")))
-        if health_class is None:
+        if not _is_palm_detection_class(str(prediction.get("class", ""))):
             continue
         confidence = float(prediction.get("confidence") or 0.0)
         width = float(prediction.get("width") or 0.0) / resize_scale
@@ -522,6 +547,7 @@ def _run_roboflow_on_asset(model_id: str, asset: ImageryAsset, job: InferenceJob
             gsd = calculate_gsd(asset.altitude_m, asset.sensor_width_mm, asset.focal_length_mm, asset.width_px)
         canopy_area = (width * height * gsd * gsd) if gsd else None
         diameter = equivalent_diameter(canopy_area)
+        health_class = _classify_canopy_size(diameter, width, height, asset.width_px, asset.height_px)
         vari = _patch_vari(image_path, x, y, width, height)
         detections.append(
             DetectionRaw(
@@ -668,7 +694,7 @@ async def run_inference_job(ctx: dict[str, Any], job_id: str) -> None:
                 "cog_assets": len(assets),
                 "yolo_confidence": settings.yolo_confidence,
                 "yolo_iou": settings.yolo_iou,
-                "health_classes": sorted(REQUIRED_CLASSES),
+                "canopy_classes": sorted(CANOPY_CLASSES),
             }
             db.commit()
         except Exception as exc:

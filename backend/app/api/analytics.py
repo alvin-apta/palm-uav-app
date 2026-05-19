@@ -89,8 +89,8 @@ def block_summary(
         photo_count=len(photos),
         gps_count=gps_count,
         tree_total=total,
-        unhealthy_count=counts.get("yellow_stressed", 0) + counts.get("dead", 0),
-        dead_count=counts.get("dead", 0),
+        small_canopy_count=counts.get("small_canopy", 0),
+        large_canopy_count=counts.get("large_canopy", 0),
         cogs_count=len(cogs),
         latest_run_jobs=latest_run_jobs,
         failed_stitch_count=failed_stitch_count,
@@ -101,11 +101,13 @@ def block_summary(
         "block_id": block.id,
         "block_name": block.name,
         "population_count": total,
+        "canopy_counts": counts,
         "health_counts": counts,
-        "unhealthy_count": counts.get("yellow_stressed", 0) + counts.get("dead", 0),
-        "unhealthy_pct": round(((counts.get("yellow_stressed", 0) + counts.get("dead", 0)) / total) * 100, 1) if total else 0,
-        "dead_count": counts.get("dead", 0),
-        "young_count": counts.get("small_young", 0),
+        "small_canopy_count": counts.get("small_canopy", 0),
+        "medium_canopy_count": counts.get("medium_canopy", 0),
+        "large_canopy_count": counts.get("large_canopy", 0),
+        "small_canopy_pct": round((counts.get("small_canopy", 0) / total) * 100, 1) if total else 0,
+        "large_canopy_pct": round((counts.get("large_canopy", 0) / total) * 100, 1) if total else 0,
         "average_canopy_diameter_m": round(float(avg_diameter), 3) if avg_diameter else None,
         "average_lai": round(float(avg_lai), 3) if avg_lai else None,
         "average_vari": round(float(avg_vari), 3) if avg_vari else None,
@@ -167,8 +169,8 @@ def _build_insights(
     photo_count: int,
     gps_count: int,
     tree_total: int,
-    unhealthy_count: int,
-    dead_count: int,
+    small_canopy_count: int,
+    large_canopy_count: int,
     cogs_count: int,
     latest_run_jobs: list[OrthomosaicJob],
     failed_stitch_count: int,
@@ -193,10 +195,10 @@ def _build_insights(
     elif latest_inference and latest_inference.status == JobStatus.failed:
         insights.append(f"Latest AI inference failed: {latest_inference.error_code or 'unknown error'}.")
     if tree_total:
-        if dead_count:
-            insights.append(f"{dead_count} dead palms detected; prioritize field verification and replanting checks.")
-        if unhealthy_count:
-            insights.append(f"{unhealthy_count} palms need attention based on current health classification.")
+        if small_canopy_count:
+            insights.append(f"{small_canopy_count} palms have small canopies; inspect young, missing, or suppressed palms in the field.")
+        if large_canopy_count:
+            insights.append(f"{large_canopy_count} palms have large canopies; check spacing and crown overlap in dense areas.")
     if failed_stitch_count and not cogs_count:
         insights.append("No usable map layer yet; retry a unified low-memory stitch before using partial batches.")
     return insights[:8]

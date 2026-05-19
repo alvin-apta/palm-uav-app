@@ -4,7 +4,4 @@ val: images/val
 test: images/test
 
 names:
-  0: healthy
-  1: yellow_stressed
-  2: small_young
-  3: dead
+  0: palm_canopy

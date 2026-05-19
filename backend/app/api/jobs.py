@@ -12,7 +12,7 @@ from app.core.config import settings
 from app.db.session import get_db
 from app.models.all_models import AssetType, ImageryAsset, InferenceJob, JobStatus, OrthomosaicJob, User
 from app.schemas.jobs import InferenceJobCreate, InferenceJobRead
-from app.worker.inference import REQUIRED_CLASSES
+from app.worker.inference import CANOPY_CLASSES
 from app.worker.queue import enqueue_inference
 
 router = APIRouter(prefix="/inference/jobs", tags=["inference"])
@@ -36,11 +36,11 @@ def model_status(
         "roboflow_model_id": settings.roboflow_model_id,
         "yolo_confidence": settings.yolo_confidence,
         "yolo_iou": settings.yolo_iou,
-        "required_classes": sorted(REQUIRED_CLASSES),
+        "canopy_classes": sorted(CANOPY_CLASSES),
         "message": (
-            "Local palm health model is configured."
+            "Local palm canopy model is configured."
             if local_configured
-            else "Hosted Roboflow palm health model is configured."
+            else "Hosted Roboflow palm canopy model is configured."
             if hosted_configured
             else "Missing palm detection model. Add /models/palm_health.pt or set ROBOFLOW_API_KEY."
         ),

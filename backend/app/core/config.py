@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     data_dir: Path = Path("/data")
     model_weights_path: Path = Path("/models/palm_health.pt")
-    yolo_confidence: float = 0.25
+    yolo_confidence: float = 0.20
     yolo_iou: float = 0.45
     roboflow_api_key: str = ""
     roboflow_model_id: str = "oil-palm-tree-health-detection/1"

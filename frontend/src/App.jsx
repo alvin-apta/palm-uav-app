@@ -1,6 +1,6 @@
 import * as React from "react";
 import { createRoot } from "react-dom/client";
-import { apiBlob, apiFetch, apiUpload, login } from "./api";
+import { apiBlob, apiFetch, apiUpload, login, publicAssetUrl } from "./api";
 import MapPanel from "./components/MapPanel";
 import "./styles.css";
 
@@ -118,6 +118,11 @@ async function filesFromDrop(dataTransfer) {
 
 function humanize(value) {
   return String(value || "-").replaceAll("_", " ");
+}
+
+function normalizeRasterSource(source) {
+  if (!source?.tiles) return source;
+  return { ...source, tiles: source.tiles.map(publicAssetUrl) };
 }
 
 function stitchJobProgress(job) {
@@ -808,7 +813,7 @@ function App() {
       .map((payload) => ({
         id: payload.asset_id || payload.id,
         label: cogLabel(payload),
-        source: payload.source,
+        source: normalizeRasterSource(payload.source),
         bounds: payload.bounds || null,
       }));
     setCogLayers(layers);
@@ -1232,7 +1237,7 @@ function App() {
               {stitchPreview && !stitchPreviewCollapsed && (
                 <div className="stitch-preview-grid">
                   <figure className="preview-frame">
-                    <img src={stitchPreview.preview_url} alt="Stitched orthomosaic preview" />
+                    <img src={publicAssetUrl(stitchPreview.preview_url)} alt="Stitched orthomosaic preview" />
                   </figure>
                   <div className="diagnostic-list">
                     <div className={`risk-card risk-${stitchPreview.diagnostics?.risk_level || "unknown"}`}>

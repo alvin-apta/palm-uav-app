@@ -30,6 +30,8 @@ ROBOFLOW_CLASS_MAP = {
     "small_young": "small_young",
     "dead": "dead",
 }
+OVERLAP_SUPPRESSION_IOU = 0.5
+OVERLAP_SUPPRESSION_CENTER_RATIO = 0.25
 
 
 def _fail_job(job: InferenceJob, code: str, message: str) -> None:
@@ -230,6 +232,52 @@ def _georef_pixel_area_m2(georef: dict[str, Any]) -> float | None:
         return None
 
 
+def _bbox_iou(first: dict[str, Any], second: dict[str, Any]) -> float:
+    ax0 = float(first.get("x") or 0.0)
+    ay0 = float(first.get("y") or 0.0)
+    ax1 = ax0 + max(float(first.get("w") or 0.0), 0.0)
+    ay1 = ay0 + max(float(first.get("h") or 0.0), 0.0)
+    bx0 = float(second.get("x") or 0.0)
+    by0 = float(second.get("y") or 0.0)
+    bx1 = bx0 + max(float(second.get("w") or 0.0), 0.0)
+    by1 = by0 + max(float(second.get("h") or 0.0), 0.0)
+
+    overlap_w = max(0.0, min(ax1, bx1) - max(ax0, bx0))
+    overlap_h = max(0.0, min(ay1, by1) - max(ay0, by0))
+    intersection = overlap_w * overlap_h
+    area_a = max(0.0, ax1 - ax0) * max(0.0, ay1 - ay0)
+    area_b = max(0.0, bx1 - bx0) * max(0.0, by1 - by0)
+    union = area_a + area_b - intersection
+    return intersection / union if union > 0 else 0.0
+
+
+def _same_crown_candidate(first: DetectionRaw, second: DetectionRaw) -> bool:
+    first_box = first.bbox_json or {}
+    second_box = second.bbox_json or {}
+    if _bbox_iou(first_box, second_box) >= OVERLAP_SUPPRESSION_IOU:
+        return True
+
+    first_w = max(float(first_box.get("w") or 0.0), 0.0)
+    first_h = max(float(first_box.get("h") or 0.0), 0.0)
+    second_w = max(float(second_box.get("w") or 0.0), 0.0)
+    second_h = max(float(second_box.get("h") or 0.0), 0.0)
+    crown_scale = min(first_w, first_h, second_w, second_h)
+    if crown_scale <= 0 or first.pixel_x is None or first.pixel_y is None or second.pixel_x is None or second.pixel_y is None:
+        return False
+
+    center_distance = math.hypot(float(first.pixel_x) - float(second.pixel_x), float(first.pixel_y) - float(second.pixel_y))
+    return center_distance <= crown_scale * OVERLAP_SUPPRESSION_CENTER_RATIO
+
+
+def _suppress_overlapping_detections(detections: list[DetectionRaw]) -> list[DetectionRaw]:
+    selected: list[DetectionRaw] = []
+    for detection in sorted(detections, key=lambda item: float(item.confidence or 0.0), reverse=True):
+        if any(_same_crown_candidate(detection, kept) for kept in selected):
+            continue
+        selected.append(detection)
+    return selected
+
+
 def _run_model_on_asset(
     model: Any,
     asset: ImageryAsset,
@@ -242,7 +290,13 @@ def _run_model_on_asset(
         return _run_roboflow_on_asset(model["model_id"], asset, job)
 
     image_path = Path(asset.stored_path)
-    results = model(str(image_path), verbose=False, conf=settings.yolo_confidence, iou=settings.yolo_iou)
+    results = model(
+        str(image_path),
+        verbose=False,
+        conf=settings.yolo_confidence,
+        iou=settings.yolo_iou,
+        agnostic_nms=True,
+    )
     detections: list[DetectionRaw] = []
     for result in results:
         boxes = getattr(result, "boxes", None)
@@ -291,7 +345,7 @@ def _run_model_on_asset(
                 raw_json={"class_name": class_name, "source": "ultralytics"},
             )
             detections.append(detection)
-    return detections
+    return _suppress_overlapping_detections(detections)
 
 
 def _run_model_on_cog(
@@ -333,7 +387,14 @@ def _run_model_on_cog(
                 x1 = min(x0 + tile_size, width)
                 y1 = min(y0 + tile_size, height)
                 crop = image.crop((x0, y0, x1, y1)).convert("RGB")
-                results = model(crop, verbose=False, imgsz=640, conf=settings.yolo_confidence, iou=settings.yolo_iou)
+                results = model(
+                    crop,
+                    verbose=False,
+                    imgsz=640,
+                    conf=settings.yolo_confidence,
+                    iou=settings.yolo_iou,
+                    agnostic_nms=True,
+                )
                 for result in results:
                     boxes = getattr(result, "boxes", None)
                     if boxes is None:
@@ -404,7 +465,7 @@ def _run_model_on_cog(
                         )
                 if progress_callback and (tile_index == total_tiles or tile_index % 5 == 0):
                     progress_callback(tile_index, total_tiles)
-    return detections
+    return _suppress_overlapping_detections(detections)
 
 
 def _run_roboflow_on_asset(model_id: str, asset: ImageryAsset, job: InferenceJob) -> list[DetectionRaw]:

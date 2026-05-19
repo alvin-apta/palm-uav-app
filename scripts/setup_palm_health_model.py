@@ -80,11 +80,11 @@ def download_dataset(api_key: str, dataset_dir: Path) -> Path:
     except ImportError as exc:
         raise SystemExit("Install Roboflow first: pip install roboflow") from exc
 
-    dataset_dir.mkdir(parents=True, exist_ok=True)
+    dataset_dir.parent.mkdir(parents=True, exist_ok=True)
     rf = Roboflow(api_key=api_key)
     project = rf.workspace(WORKSPACE).project(PROJECT)
     version = project.version(VERSION)
-    dataset = version.download("yolov8", location=str(dataset_dir))
+    dataset = version.download("yolov8", location=str(dataset_dir), overwrite=True)
     return Path(dataset.location)
 
 

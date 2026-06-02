@@ -628,7 +628,10 @@ function App() {
       loadMapData(currentBlockId).catch((error) => setMessage(error.message));
       loadSummary(currentBlockId).catch(() => setSummary(null));
       loadStitchQuality(currentBlockId).catch(() => setStitchQuality(null));
-      loadBlockAreas(currentBlockId).catch(() => setAreaPolygons(EMPTY_FEATURE_COLLECTION));
+      loadBlockAreas(currentBlockId).catch((error) => {
+        setAreaPolygons(EMPTY_FEATURE_COLLECTION);
+        setMessage(`Saved areas unavailable: ${error.message}`);
+      });
     }
   }, [currentBlockId, token, latestInferenceJob?.id]);
 

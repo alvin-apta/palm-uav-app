@@ -22,10 +22,8 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
     )
     op.create_index("ix_block_areas_block_id", "block_areas", ["block_id"])
-    op.create_index("idx_block_areas_geom", "block_areas", ["geom"], postgresql_using="gist")
 
 
 def downgrade() -> None:
-    op.drop_index("idx_block_areas_geom", table_name="block_areas")
     op.drop_index("ix_block_areas_block_id", table_name="block_areas")
     op.drop_table("block_areas")

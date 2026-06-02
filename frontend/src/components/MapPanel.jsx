@@ -244,7 +244,7 @@ export default function MapPanel({
         source: "area-polygons",
         paint: {
           "fill-color": fillColor,
-          "fill-opacity": 0.22,
+          "fill-opacity": 0.34,
         },
       });
       map.addLayer({
@@ -253,7 +253,7 @@ export default function MapPanel({
         source: "area-polygons",
         paint: {
           "line-color": fillColor,
-          "line-width": 2.5,
+          "line-width": 3.5,
         },
       });
       const showAreaPopup = (event) => {
@@ -274,13 +274,14 @@ export default function MapPanel({
           map.getCanvas().style.cursor = "pointer";
         });
         map.on("mouseleave", layerId, () => {
-          map.getCanvas().style.cursor = drawingArea ? "crosshair" : "";
+          map.getCanvas().style.cursor = drawingAreaRef.current ? "crosshair" : "";
         });
       });
     } else {
       map.getSource("area-polygons").setData(areaPolygons);
     }
-  }, [areaPolygons, drawingArea, mapReady]);
+    moveAreaLayersToTop(map);
+  }, [areaPolygons, mapReady]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -373,6 +374,7 @@ export default function MapPanel({
       );
       cogLayerIdsRef.current.push(layerId);
     });
+    moveAreaLayersToTop(map);
   }, [cogSource, cogBounds, cogLayers, mapReady]);
 
   useEffect(() => {
@@ -454,4 +456,10 @@ function draftFeatureCollection(coordinates) {
     });
   }
   return { type: "FeatureCollection", features };
+}
+
+function moveAreaLayersToTop(map) {
+  ["area-polygon-fill", "area-polygon-line", "draft-area-line", "draft-area-points"].forEach((layerId) => {
+    if (map.getLayer(layerId)) map.moveLayer(layerId);
+  });
 }

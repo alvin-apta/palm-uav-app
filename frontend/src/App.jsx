@@ -1143,6 +1143,11 @@ function App() {
     downloadBlob(blob, `prescription-${currentBlockId}.zip`);
   }
 
+  async function downloadGeoPdf() {
+    const blob = await apiBlob(`/exports/geopdf/block?block_id=${currentBlockId}`, token, { method: "POST" });
+    downloadBlob(blob, `geopdf-${currentBlockId}.pdf`);
+  }
+
   async function downloadMissionKmz(missionId) {
     const blob = await apiBlob(`/exports/kmz/mission?mission_id=${missionId}`, token, { method: "POST" });
     downloadBlob(blob, `mission-${missionId}.kmz`);
@@ -1804,6 +1809,9 @@ function App() {
             <h2>VRT Prescription Export</h2>
             <p>Exports spot-treatment points as GeoJSON, CSV, KML, and KMZ in one bundle. Dose rates remain manager-configured.</p>
             <button onClick={downloadPrescription}>Download Prescription Bundle</button>
+            <h2>Offline GeoPDF Map</h2>
+            <p>Exports a georeferenced PDF with block boundary and palm canopy points for offline use in Avenza Maps.</p>
+            <button onClick={downloadGeoPdf}>Download GeoPDF Map</button>
           </section>
         )}
 

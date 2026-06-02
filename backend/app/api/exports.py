@@ -5,13 +5,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_roles
 from app.db.session import get_db
-from app.models.all_models import Mission, PrescriptionMap, Tree, User, UserRole
-from app.services.exports import kmz_bytes, prescription_bundle_bytes, trees_to_kml
+from app.models.all_models import Block, Mission, PrescriptionMap, Tree, User, UserRole
+from app.services.exports import block_geopdf_bytes, kmz_bytes, prescription_bundle_bytes
 
 router = APIRouter(prefix="/exports", tags=["exports"])
 
@@ -68,3 +68,33 @@ def export_prescription(
         headers={"Content-Disposition": f'attachment; filename="prescription-{block_id}.zip"'},
     )
 
+
+@router.post("/geopdf/block")
+def export_block_geopdf(
+    block_id: str,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[User, Depends(get_current_user)],
+) -> StreamingResponse:
+    block = db.get(Block, block_id)
+    if block is None:
+        raise HTTPException(status_code=404, detail="Block not found")
+    trees = list(db.scalars(select(Tree).where(Tree.block_id == block_id).order_by(Tree.health_class, Tree.id)).all())
+    boundary = db.execute(
+        text(
+            """
+            SELECT ST_AsGeoJSON(boundary)::json AS geometry
+            FROM blocks
+            WHERE id = :block_id AND boundary IS NOT NULL
+            """
+        ),
+        {"block_id": block_id},
+    ).scalar()
+    if not trees and not boundary:
+        raise HTTPException(status_code=404, detail="No mapped block boundary or palms found for GeoPDF export")
+    pdf = block_geopdf_bytes(block, trees, boundary)
+    safe_name = "".join(char if char.isalnum() or char in ("-", "_") else "-" for char in block.name).strip("-") or block.id
+    return StreamingResponse(
+        io.BytesIO(pdf),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="geopdf-{safe_name}.pdf"'},
+    )

@@ -95,6 +95,17 @@ class Block(Base):
     __table_args__ = (UniqueConstraint("estate_id", "name", name="uq_blocks_estate_name"),)
 
 
+class BlockArea(Base):
+    __tablename__ = "block_areas"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    block_id: Mapped[str] = mapped_column(ForeignKey("blocks.id"), nullable=False, index=True)
+    created_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    geom: Mapped[object] = mapped_column(Geometry("MULTIPOLYGON", srid=4326), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class Mission(Base):
     __tablename__ = "missions"
 

@@ -31,7 +31,12 @@ export default function MapPanel({
   const hoverPopupRef = useRef(null);
   const cogLayerIdsRef = useRef([]);
   const draftAreaRef = useRef([]);
+  const drawingAreaRef = useRef(false);
   const [mapReady, setMapReady] = useState(false);
+
+  useEffect(() => {
+    drawingAreaRef.current = drawingArea;
+  }, [drawingArea]);
 
   useEffect(() => {
     if (mapRef.current || !containerRef.current) return;
@@ -252,6 +257,7 @@ export default function MapPanel({
         },
       });
       const showAreaPopup = (event) => {
+        if (drawingAreaRef.current) return;
         const feature = event.features?.[0];
         if (!feature) return;
         const props = feature.properties || {};

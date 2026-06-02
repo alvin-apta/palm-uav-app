@@ -456,7 +456,7 @@ function App() {
   const [cogLayers, setCogLayers] = useState([]);
   const [cogBoundsList, setCogBoundsList] = useState([]);
   const [selectedCogIds, setSelectedCogIds] = useState([]);
-  const [showDetectionBoxes, setShowDetectionBoxes] = useState(true);
+  const [showDetectionBoxes, setShowDetectionBoxes] = useState(false);
   const [selectedDetectionClasses, setSelectedDetectionClasses] = useState(CANOPY_OPTIONS);
   const [mapZoomRequest, setMapZoomRequest] = useState(0);
   const [locateRequest, setLocateRequest] = useState(0);
@@ -614,6 +614,11 @@ function App() {
     setStitchQuality(await apiFetch(`/orthomosaics/quality?block_id=${blockId}`, token));
   }
 
+  async function loadBlockAreas(blockId = currentBlockId) {
+    if (!blockId || !token) return;
+    setAreaPolygons(await apiFetch(`/spatial/block-areas?block_id=${blockId}`, token));
+  }
+
   useEffect(() => {
     refreshAll().catch((error) => setMessage(error.message));
   }, []);
@@ -623,6 +628,7 @@ function App() {
       loadMapData(currentBlockId).catch((error) => setMessage(error.message));
       loadSummary(currentBlockId).catch(() => setSummary(null));
       loadStitchQuality(currentBlockId).catch(() => setStitchQuality(null));
+      loadBlockAreas(currentBlockId).catch(() => setAreaPolygons(EMPTY_FEATURE_COLLECTION));
     }
   }, [currentBlockId, token, latestInferenceJob?.id]);
 
@@ -641,7 +647,6 @@ function App() {
   }, [currentBlockId, stitchPreview]);
 
   useEffect(() => {
-    setAreaPolygons(EMPTY_FEATURE_COLLECTION);
     setAreaDrawing(false);
   }, [currentBlockId]);
 
@@ -1132,33 +1137,22 @@ function App() {
     setLocateRequest((value) => value + 1);
   }
 
-  async function generateAreaGrid() {
-    if (!currentBlockId) return;
-    setAreaLoading(true);
-    setMessage("Generating area summaries...");
-    try {
-      const grid = await apiFetch(`/spatial/block-area-grid?block_id=${currentBlockId}&cells=5`, token);
-      setAreaPolygons(grid);
-      setAreaDrawing(false);
-      setMessage(`Created ${grid.features?.length || 0} area summaries`);
-    } catch (error) {
-      setMessage(`Area grid failed: ${error.message}`);
-    } finally {
-      setAreaLoading(false);
-    }
-  }
-
   const summarizeDrawnArea = useCallback(
     async (geometry) => {
       if (!currentBlockId || !token) return;
+      const name = window.prompt("Area name", `Area ${(areaPolygons.features?.length || 0) + 1}`);
+      if (!name?.trim()) {
+        setAreaDrawing(false);
+        return;
+      }
       setAreaLoading(true);
-      setMessage("Summarizing drawn area...");
+      setMessage("Saving area...");
       try {
-        const feature = await apiFetch("/spatial/area-summary", token, {
+        const feature = await apiFetch("/spatial/block-areas", token, {
           method: "POST",
           body: JSON.stringify({
             block_id: currentBlockId,
-            name: "Drawn area",
+            name,
             geometry,
           }),
         });
@@ -1167,18 +1161,46 @@ function App() {
           features: [...(collection.features || []), feature],
         }));
         setAreaDrawing(false);
-        setMessage(`Drawn area contains ${feature.properties?.tree_count || 0} palms`);
+        setMessage(`Saved ${feature.properties?.name || "area"} with ${feature.properties?.tree_count || 0} palms`);
       } catch (error) {
-        setMessage(`Area summary failed: ${error.message}`);
+        setMessage(`Area save failed: ${error.message}`);
       } finally {
         setAreaLoading(false);
       }
     },
-    [currentBlockId, token],
+    [areaPolygons.features?.length, currentBlockId, token],
   );
 
-  function clearAreaPolygons() {
-    setAreaPolygons(EMPTY_FEATURE_COLLECTION);
+  async function deleteBlockArea(areaId) {
+    if (!areaId || !token) return;
+    setAreaLoading(true);
+    try {
+      await apiFetch(`/spatial/block-areas/${areaId}`, token, { method: "DELETE" });
+      setAreaPolygons((collection) => ({
+        type: "FeatureCollection",
+        features: (collection.features || []).filter((feature) => feature.properties?.id !== areaId),
+      }));
+      setMessage("Area deleted");
+    } catch (error) {
+      setMessage(`Area delete failed: ${error.message}`);
+    } finally {
+      setAreaLoading(false);
+    }
+  }
+
+  async function refreshBlockAreas() {
+    setAreaLoading(true);
+    try {
+      await loadBlockAreas();
+      setMessage("Saved areas refreshed");
+    } catch (error) {
+      setMessage(`Area refresh failed: ${error.message}`);
+    } finally {
+      setAreaLoading(false);
+    }
+  }
+
+  function stopAreaDrawing() {
     setAreaDrawing(false);
   }
 
@@ -1786,9 +1808,9 @@ function App() {
               <CollapseCard title="Area summaries" meta={areaLoading ? "Loading" : areaPolygonCount} open={mapSections.areas} onToggle={() => toggleMapSection("areas")}>
                 <div className="area-toolbox">
                   <div className="map-action-grid">
-                    <button disabled={areaLoading || !currentBlockId} onClick={generateAreaGrid}>{areaLoading ? "Working..." : "Create 5 Grid Areas"}</button>
                     <button className={areaDrawing ? "" : "secondary-action"} title="Click map vertices, then double-click to finish." disabled={areaLoading || !currentBlockId} onClick={() => setAreaDrawing((value) => !value)}>{areaDrawing ? "Drawing Active" : "Draw Area"}</button>
-                    <button className="secondary-action" disabled={!areaPolygonCount} onClick={clearAreaPolygons}>Clear Areas</button>
+                    <button className="secondary-action" disabled={!areaDrawing} onClick={stopAreaDrawing}>Stop Drawing</button>
+                    <button className="secondary-action" disabled={areaLoading || !currentBlockId} onClick={refreshBlockAreas}>{areaLoading ? "Refreshing..." : "Refresh Areas"}</button>
                   </div>
                   <div className="area-summary-list">
                     {(areaPolygons.features || []).map((feature, index) => {
@@ -1797,8 +1819,9 @@ function App() {
                         <article key={`${props.name || "area"}-${index}`} className="area-summary-card">
                           <div>
                             <strong>{props.name || `Area ${index + 1}`}</strong>
-                            <span>{formatKpiValue(props.area_ha)} ha</span>
+                            <button className="text-action" disabled={areaLoading || !props.id} onClick={() => deleteBlockArea(props.id)}>Delete</button>
                           </div>
+                          <span>{formatKpiValue(props.area_ha)} ha</span>
                           <div className="area-summary-main">
                             <span>Palms</span>
                             <strong>{formatKpiValue(props.tree_count)}</strong>

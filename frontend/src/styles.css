@@ -1033,6 +1033,21 @@ nav button:hover {
   background: var(--surface-blue);
 }
 
+.text-action {
+  min-height: 0;
+  border: 0;
+  background: transparent;
+  color: var(--red);
+  font-size: 12px;
+  font-weight: 850;
+  padding: 0;
+}
+
+.text-action:hover {
+  background: transparent;
+  color: #991b1b;
+}
+
 .danger-action {
   border: 1px solid #fecaca;
   background: #fef2f2;

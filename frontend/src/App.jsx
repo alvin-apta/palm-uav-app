@@ -5,7 +5,7 @@ import MapPanel from "./components/MapPanel";
 import "./styles.css";
 
 const { useEffect, useMemo, useState } = React;
-const NAV = ["Home", "Missions", "Upload Imagery", "Stitching", "Map", "Prescriptions", "Reports", "Admin"];
+const NAV = ["Home", "Dashboard", "Missions", "Upload Imagery", "Stitching", "Map", "Prescriptions", "Reports", "Admin"];
 const CANOPY_OPTIONS = ["small_canopy", "medium_canopy", "large_canopy"];
 const ACTIVE_STITCH_STATUSES = new Set(["queued", "running"]);
 const PHOTO_FILE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".tif", ".tiff"]);
@@ -202,6 +202,200 @@ function formatMetric(value, suffix = "") {
   return `${value}${suffix}`;
 }
 
+function formatKpiValue(value) {
+  if (value === null || value === undefined || value === "") return "-";
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return String(value);
+  if (Math.abs(numeric) >= 1000) return Math.round(numeric).toLocaleString();
+  if (Number.isInteger(numeric)) return numeric.toLocaleString();
+  return numeric.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+function percent(part, total) {
+  const divisor = Number(total || 0);
+  if (!divisor) return 0;
+  return Math.round((Number(part || 0) / divisor) * 1000) / 10;
+}
+
+function normalizeBounds(bounds) {
+  if (!Array.isArray(bounds) || bounds.length !== 4) return null;
+  const [west, south, east, north] = bounds.map(Number);
+  if ([west, south, east, north].some((value) => Number.isNaN(value))) return null;
+  return {
+    west: Math.min(west, east),
+    south: Math.min(south, north),
+    east: Math.max(west, east),
+    north: Math.max(south, north),
+  };
+}
+
+function rectangleAreaHa(rect) {
+  if (!rect || rect.east <= rect.west || rect.north <= rect.south) return 0;
+  const avgLatRad = ((rect.south + rect.north) / 2) * (Math.PI / 180);
+  const widthM = Math.abs(rect.east - rect.west) * 111320 * Math.max(0.01, Math.cos(avgLatRad));
+  const heightM = Math.abs(rect.north - rect.south) * 110574;
+  return (widthM * heightM) / 10000;
+}
+
+function totalMappedAreaHa(boundsList) {
+  const rects = (boundsList || []).map(normalizeBounds).filter(Boolean);
+  if (!rects.length) return null;
+  const xs = [...new Set(rects.flatMap((rect) => [rect.west, rect.east]))].sort((a, b) => a - b);
+  const ys = [...new Set(rects.flatMap((rect) => [rect.south, rect.north]))].sort((a, b) => a - b);
+  let total = 0;
+  for (let xIndex = 0; xIndex < xs.length - 1; xIndex += 1) {
+    for (let yIndex = 0; yIndex < ys.length - 1; yIndex += 1) {
+      const cell = { west: xs[xIndex], east: xs[xIndex + 1], south: ys[yIndex], north: ys[yIndex + 1] };
+      const centerLon = (cell.west + cell.east) / 2;
+      const centerLat = (cell.south + cell.north) / 2;
+      const covered = rects.some(
+        (rect) => centerLon >= rect.west && centerLon <= rect.east && centerLat >= rect.south && centerLat <= rect.north
+      );
+      if (covered) total += rectangleAreaHa(cell);
+    }
+  }
+  return total || null;
+}
+
+function BarChart({ title, data, unit = "" }) {
+  const max = Math.max(...data.map((item) => Number(item.value || 0)), 1);
+  return (
+    <article className="chart-card">
+      <h2>{title}</h2>
+      <div className="bar-chart">
+        {data.map((item) => {
+          const width = Math.max(2, (Number(item.value || 0) / max) * 100);
+          return (
+            <div className="bar-row" key={item.label}>
+              <span>{item.label}</span>
+              <div className="bar-track"><i style={{ width: `${width}%` }} /></div>
+              <strong>{formatKpiValue(item.value)}{unit}</strong>
+            </div>
+          );
+        })}
+      </div>
+    </article>
+  );
+}
+
+function DonutChart({ title, data, total }) {
+  let offset = 25;
+  const circumference = 100;
+  const colors = ["#eab308", "#16a34a", "#2563eb", "#f59e0b"];
+  return (
+    <article className="chart-card donut-card">
+      <h2>{title}</h2>
+      <div className="donut-layout">
+        <svg className="donut-chart" viewBox="0 0 42 42" role="img" aria-label={title}>
+          <circle className="donut-bg" cx="21" cy="21" r="15.9155" />
+          {data.map((item, index) => {
+            const value = percent(item.value, total);
+            const dash = `${value} ${circumference - value}`;
+            const segment = (
+              <circle
+                key={item.label}
+                className="donut-segment"
+                cx="21"
+                cy="21"
+                r="15.9155"
+                stroke={colors[index % colors.length]}
+                strokeDasharray={dash}
+                strokeDashoffset={offset}
+              />
+            );
+            offset -= value;
+            return segment;
+          })}
+          <text x="21" y="19.5">{formatKpiValue(total)}</text>
+          <text x="21" y="24.5">palms</text>
+        </svg>
+        <div className="chart-legend">
+          {data.map((item, index) => (
+            <span key={item.label}><i style={{ background: colors[index % colors.length] }} />{item.label}<strong>{percent(item.value, total)}%</strong></span>
+          ))}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function GaugeChart({ title, value, center, detail }) {
+  const normalized = Math.max(0, Math.min(100, Number(value || 0)));
+  return (
+    <article className="chart-card gauge-card">
+      <h2>{title}</h2>
+      <div className="gauge-layout">
+        <svg className="gauge-chart" viewBox="0 0 42 42" role="img" aria-label={title}>
+          <circle className="donut-bg" cx="21" cy="21" r="15.9155" />
+          <circle
+            className="gauge-segment"
+            cx="21"
+            cy="21"
+            r="15.9155"
+            strokeDasharray={`${normalized} ${100 - normalized}`}
+          />
+          <text x="21" y="20">{formatKpiValue(value)}%</text>
+          <text x="21" y="25">target</text>
+        </svg>
+        <div>
+          <strong>{center}</strong>
+          <span>{detail}</span>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function StackedBarChart({ title, segments, totalLabel }) {
+  const total = segments.reduce((sum, item) => sum + Number(item.value || 0), 0);
+  return (
+    <article className="chart-card stacked-card">
+      <h2>{title}</h2>
+      <div className="stacked-bar" aria-label={title}>
+        {segments.map((item, index) => {
+          const width = total ? Math.max(2, (Number(item.value || 0) / total) * 100) : 0;
+          return <i key={item.label} className={`stacked-segment segment-${index}`} style={{ width: `${width}%` }} />;
+        })}
+      </div>
+      <div className="chart-legend">
+        {segments.map((item, index) => (
+          <span key={item.label}>
+            <i className={`segment-${index}`} />
+            {item.label}
+            <strong>{formatKpiValue(item.value)} ha</strong>
+          </span>
+        ))}
+      </div>
+      <p>{totalLabel}</p>
+    </article>
+  );
+}
+
+function UnavailableChart({ title, reason }) {
+  return (
+    <article className="chart-card unavailable-card">
+      <h2>{title}</h2>
+      <strong>Not available</strong>
+      <p>{reason}</p>
+    </article>
+  );
+}
+
+function DiameterChart({ value }) {
+  const diameter = Number(value || 0);
+  const normalized = Math.max(4, Math.min(100, (diameter / 12) * 100));
+  return (
+    <article className="chart-card diameter-card">
+      <h2>Average Canopy Diameter</h2>
+      <div className="diameter-visual">
+        <i style={{ width: `${normalized}%`, height: `${normalized}%` }} />
+      </div>
+      <strong>{value ? `${formatKpiValue(value)} m` : "-"}</strong>
+      <p>Canopy size is available from tree detections even when block area is missing.</p>
+    </article>
+  );
+}
+
 function cogLabel(asset) {
   if (asset?.batch_total > 1) return `Batch ${asset.batch_index}/${asset.batch_total}`;
   return asset?.original_filename || "Orthomosaic";
@@ -257,7 +451,7 @@ function App() {
   const [cogBounds, setCogBounds] = useState(null);
   const [cogLayers, setCogLayers] = useState([]);
   const [cogBoundsList, setCogBoundsList] = useState([]);
-  const [selectedCogIds, setSelectedCogIds] = useState(["all"]);
+  const [selectedCogIds, setSelectedCogIds] = useState([]);
   const [showDetectionBoxes, setShowDetectionBoxes] = useState(true);
   const [selectedDetectionClasses, setSelectedDetectionClasses] = useState(CANOPY_OPTIONS);
   const [mapZoomRequest, setMapZoomRequest] = useState(0);
@@ -276,9 +470,12 @@ function App() {
   const [stitchRefreshing, setStitchRefreshing] = useState(false);
   const [qualityRefreshing, setQualityRefreshing] = useState(false);
   const [cogRegistering, setCogRegistering] = useState(false);
+  const [missionImporting, setMissionImporting] = useState(false);
+  const [missionImportSummary, setMissionImportSummary] = useState(null);
   const [inferenceSubmitting, setInferenceSubmitting] = useState(false);
   const [modelStatus, setModelStatus] = useState(null);
   const [mapLoading, setMapLoading] = useState(false);
+  const [mapOverlayLoading, setMapOverlayLoading] = useState(false);
   const [mapSections, setMapSections] = useState({
     overlays: false,
     detections: false,
@@ -333,6 +530,10 @@ function App() {
     [overlayFilteredDetections, selectedDetectionClasses]
   );
   const detectionCount = filteredDetections.features?.length || 0;
+  const mappedAreaHa = useMemo(() => {
+    const boundsList = cogBoundsList.length ? cogBoundsList : cogBounds ? [cogBounds] : [];
+    return totalMappedAreaHa(boundsList);
+  }, [cogBounds, cogBoundsList]);
   const inferenceButtonLabel = inferenceSubmitting ? "Starting..." : latestInferenceJob ? "Run Again" : "Run Inference";
 
   async function refreshAll(nextToken = token) {
@@ -356,19 +557,12 @@ function App() {
 
   async function loadMapData(blockId = currentBlockId) {
     if (!blockId || !token) return;
-    const query = new URLSearchParams({ block_id: blockId });
-    if (latestInferenceJob?.block_id === blockId) query.set("job_id", latestInferenceJob.id);
-    const [treeGeojson, detectionGeojson, cogRows] = await Promise.all([
-      apiFetch(`/map/trees.geojson?${query}`, token),
-      apiFetch(`/map/detections.geojson?${query}`, token),
-      apiFetch(`/map/cogs?block_id=${blockId}`, token),
-    ]);
-    setTrees(treeGeojson);
-    setDetections(detectionGeojson);
+    const cogRows = await apiFetch(`/map/cogs?block_id=${blockId}`, token);
     setCogs(cogRows);
+    let nextIds = [];
     if (cogRows.length) {
       const validIds = selectedCogIds.filter((id) => id === "all" || cogRows.some((asset) => asset.id === id));
-      const nextIds = selectedCogIds.length === 0 ? [cogRows[0].id] : validIds.length ? validIds : [cogRows[0].id];
+      nextIds = selectedCogIds.length === 0 ? [cogRows[0].id] : validIds.length ? validIds : [cogRows[0].id];
       await loadCogSelection(nextIds, cogRows);
     } else {
       setSelectedCogIds([]);
@@ -377,7 +571,31 @@ function App() {
       setCogLayers([]);
       setCogBoundsList([]);
     }
-    return { treeGeojson, cogRows };
+    loadMapOverlays(blockId, nextIds).catch((error) => setMessage(`Map overlays delayed: ${error.message}`));
+    return { cogRows };
+  }
+
+  async function loadMapOverlays(blockId = currentBlockId, selectionIds = selectedCogIds) {
+    if (!blockId || !token) return;
+    const treeQuery = new URLSearchParams({ block_id: blockId });
+    const detectionQuery = new URLSearchParams({ block_id: blockId });
+    if (latestInferenceJob?.block_id === blockId) {
+      treeQuery.set("job_id", latestInferenceJob.id);
+      detectionQuery.set("job_id", latestInferenceJob.id);
+    }
+    const selectedAssetIds = Array.isArray(selectionIds) ? selectionIds.filter((id) => id && id !== "all") : [];
+    if (selectedAssetIds.length === 1) detectionQuery.set("asset_id", selectedAssetIds[0]);
+    setMapOverlayLoading(true);
+    Promise.all([
+      apiFetch(`/map/trees.geojson?${treeQuery}`, token),
+      apiFetch(`/map/detections.geojson?${detectionQuery}`, token),
+    ])
+      .then(([treeGeojson, detectionGeojson]) => {
+        setTrees(treeGeojson);
+        setDetections(detectionGeojson);
+      })
+      .catch((error) => setMessage(`Map overlays delayed: ${error.message}`))
+      .finally(() => setMapOverlayLoading(false));
   }
 
   async function loadSummary(blockId = currentBlockId) {
@@ -477,6 +695,35 @@ function App() {
     await apiFetch("/missions", token, { method: "POST", body: JSON.stringify(payload) });
     await refreshAll();
     setMessage("Mission saved");
+  }
+
+  async function importMissionPlan(event) {
+    event.preventDefault();
+    if (!currentBlockId) {
+      setMessage("Create or select a block before importing a mission plan");
+      return;
+    }
+    const formElement = event.currentTarget;
+    const file = formElement.elements.file?.files?.[0];
+    if (!file) {
+      setMessage("Choose a .kmz, .kml, .wpml, or .kmz.zip mission file");
+      return;
+    }
+    const form = new FormData(formElement);
+    form.set("block_id", currentBlockId);
+    setMissionImporting(true);
+    setMessage("Reading mission route file...");
+    try {
+      const result = await apiFetch("/missions/import-plan", token, { method: "POST", body: form });
+      setMissionImportSummary(result.summary);
+      await refreshAll();
+      formElement.reset();
+      setMessage(`Imported mission plan: ${result.summary.waypoint_count || 0} waypoint(s)`);
+    } catch (error) {
+      setMessage(`Mission import failed: ${error.message}`);
+    } finally {
+      setMissionImporting(false);
+    }
   }
 
   function addPhotoFiles(files) {
@@ -768,6 +1015,7 @@ function App() {
       nextIds = checked ? [...new Set([...withoutAll, assetId])] : withoutAll.filter((id) => id !== assetId);
     }
     await loadCogSelection(nextIds);
+    loadMapOverlays(currentBlockId, nextIds).catch((error) => setMessage(`Map overlays delayed: ${error.message}`));
   }
 
   function toggleDetectionClass(className, checked) {
@@ -925,6 +1173,63 @@ function App() {
     ],
     [summary, treeCount, cogs.length, detectionCount]
   );
+  const canopyChartData = useMemo(
+    () => [
+      { label: "Small", value: summary?.small_canopy_count ?? 0 },
+      { label: "Medium", value: summary?.medium_canopy_count ?? 0 },
+      { label: "Large", value: summary?.large_canopy_count ?? 0 },
+    ],
+    [summary]
+  );
+  const inspectionChartData = useMemo(
+    () => [
+      { label: "Missing capacity", value: summary?.area?.not_planted_area_ha ?? 0 },
+      { label: "Small canopy", value: summary?.area?.small_canopy_inspection_area_ha ?? 0 },
+    ],
+    [summary]
+  );
+  const treeDensity = summary?.area?.block_area_ha ? (summary?.population_count ?? treeCount) / summary.area.block_area_ha : null;
+  const treeDensityPct = summary?.area?.target_palms_ha && treeDensity ? Math.min(100, (treeDensity / summary.area.target_palms_ha) * 100) : null;
+  const hasAreaBasis = Boolean(summary?.area?.block_area_ha);
+  const hasFullnessBasis = Boolean(summary?.area?.block_area_ha && summary?.area?.target_palms_ha);
+  const dashboardAnalysis = useMemo(() => {
+    const total = summary?.population_count ?? treeCount;
+    const small = summary?.small_canopy_count ?? 0;
+    const medium = summary?.medium_canopy_count ?? 0;
+    const large = summary?.large_canopy_count ?? 0;
+    const classes = [
+      { label: "small canopy", value: small },
+      { label: "medium canopy", value: medium },
+      { label: "large canopy", value: large },
+    ];
+    const dominant = classes.reduce((best, item) => (item.value > best.value ? item : best), classes[0]);
+    const analysis = [];
+    if (!summary) return ["No analytics loaded for the selected block yet."];
+    if (!summary.area?.block_area_ha) {
+      analysis.push("Area, density, planted fullness, not-planted percentage, and inspection hectares need a block boundary. This block currently has tree-only analytics.");
+    } else if (!summary.area?.target_palms_ha) {
+      analysis.push("Block area is available, but planted fullness needs target palms/ha. Add a planting target to compare mapped palms against expected capacity.");
+    }
+    if (total) {
+      analysis.push(`${formatKpiValue(total)} palms are mapped. ${dominant.value ? `${humanize(dominant.label)} is the dominant class at ${formatKpiValue(percent(dominant.value, total))}%.` : "No dominant canopy class is available yet."}`);
+      analysis.push(`${formatKpiValue(small)} small-canopy palm${small === 1 ? "" : "s"} represent ${formatKpiValue(percent(small, total))}% of mapped palms and should be the first field review group.`);
+      analysis.push(`${formatKpiValue(large)} large-canopy palm${large === 1 ? "" : "s"} represent ${formatKpiValue(percent(large, total))}% of mapped palms; check dense crown overlap before treating them as abnormal.`);
+    }
+    if (summary.average_canopy_diameter_m) {
+      analysis.push(`Average canopy diameter is ${formatKpiValue(summary.average_canopy_diameter_m)} m, so canopy-size analysis is available even when area-based analysis is missing.`);
+    }
+    return analysis.slice(0, 5);
+  }, [summary, treeCount]);
+  const headlineInsight = useMemo(() => {
+    if (!summary) return "Run inference on a stitched orthomosaic to populate KPI charts.";
+    if (!summary.area?.block_area_ha) return `${summary.block_name} has tree-only analytics because no block boundary is available for area calculations.`;
+    if (!summary.area?.target_palms_ha) return `${summary.block_name} has area analytics, but fullness needs target palms/ha.`;
+    if (summary.area?.inspection_area_ha) return `${summary.area.inspection_area_ha} ha need inspection; ${formatKpiValue(summary.area.not_planted_pct)}% of expected planting capacity is not mapped as planted.`;
+    if ((summary.small_canopy_count || 0) > 0) return `${summary.small_canopy_count} small-canopy palms should be prioritized for field inspection.`;
+    if ((summary.large_canopy_count || 0) > 0) return `${summary.large_canopy_count} large-canopy palms may indicate dense crowns or overlap zones.`;
+    if (summary.population_count) return `${summary.population_count} palms mapped with ${formatMetric(summary.average_confidence, "")} average model confidence.`;
+    return "No palm detections are available for this block yet.";
+  }, [summary]);
 
   if (!token || !user) {
     return (
@@ -973,25 +1278,104 @@ function App() {
           </section>
         )}
 
+        {active === "Dashboard" && (
+          <section className="dashboard-page">
+            <div className="dashboard-head">
+              <div>
+                <span className="eyebrow">Area and tree dashboard</span>
+                <h2>{summary?.block_name || "Selected block"}</h2>
+                <p>{headlineInsight}</p>
+              </div>
+              <div className="dashboard-status">
+                <span>Mapped area</span>
+                <strong>{mappedAreaHa ? `${formatKpiValue(mappedAreaHa)} ha` : "-"}</strong>
+              </div>
+            </div>
+
+            <div className={`dashboard-charts ${hasFullnessBasis ? "" : "is-partial"}`}>
+              {hasFullnessBasis ? (
+                <GaugeChart
+                  title="Planted Fullness"
+                  value={summary?.area?.planted_fullness_pct ?? 0}
+                  center={`${formatKpiValue(summary?.population_count ?? treeCount)} of ${formatKpiValue(summary?.area?.expected_palms)} palms`}
+                  detail={`Expected capacity at ${formatKpiValue(summary?.area?.target_palms_ha)} palms/ha`}
+                />
+              ) : null}
+              {hasFullnessBasis ? (
+                <GaugeChart
+                  title="Density Against Target"
+                  value={treeDensityPct ?? 0}
+                  center={treeDensity ? `${formatKpiValue(treeDensity)} palms/ha` : "-"}
+                  detail={`Target ${formatKpiValue(summary?.area?.target_palms_ha)} palms/ha`}
+                />
+              ) : (
+                <DiameterChart value={summary?.average_canopy_diameter_m} />
+              )}
+              {hasAreaBasis ? (
+                <StackedBarChart
+                  title="Inspection Area"
+                  segments={inspectionChartData}
+                  totalLabel={`${formatKpiValue(summary?.area?.inspection_area_ha)} ha total inspection priority`}
+                />
+              ) : (
+                <UnavailableChart title="Area Inputs Missing" reason="Add a block boundary to calculate inspection hectares, planting fullness, and missing area." />
+              )}
+              <DonutChart title="Canopy Class Mix" data={canopyChartData} total={summary?.population_count ?? treeCount} />
+            </div>
+
+            <article className="panel insight-panel">
+              <h2>Block Analysis</h2>
+              <div className="insight-list">
+                {dashboardAnalysis.map((insight) => <span key={insight}>{insight}</span>)}
+              </div>
+            </article>
+          </section>
+        )}
+
         {active === "Missions" && (
-          <section className="two-col">
-            <form className="panel form-grid" onSubmit={createBlock}>
-              <h2>Create Block</h2>
-              <label>Estate<input name="estate_name" defaultValue="Demo Estate" /></label>
-              <label>Block<input name="name" defaultValue="Block A" /></label>
-              <label>Planting year<input name="planting_year" type="number" defaultValue="2018" /></label>
-              <label>Palm spacing m<input name="palm_spacing_m" type="number" step="0.1" defaultValue="9" /></label>
-              <label>Target palms/ha<input name="target_palms_ha" type="number" defaultValue="136" /></label>
-              <button>Create Block</button>
-            </form>
-            <form className="panel form-grid" onSubmit={createMission}>
-              <h2>Plan Mission</h2>
-              <label>Mission type<select name="mission_type"><option value="inventory">Inventory</option><option value="inspection">Inspection</option><option value="repeat">Repeat monitoring</option></select></label>
-              <label>Pilot<input name="pilot" defaultValue="Pilot" /></label>
-              <label>Drone<input name="drone_name" defaultValue="DJI Mini 5 Pro" /></label>
-              <label className="wide">Route notes<textarea name="route_notes" defaultValue="50MP nadir photos, 80/70 overlap, repeatable waypoint route." /></label>
-              <button>Save Mission</button>
-            </form>
+          <section className="missions-layout">
+            <div className="two-col">
+              <form className="panel form-grid" onSubmit={createBlock}>
+                <h2>Create Block</h2>
+                <label>Estate<input name="estate_name" defaultValue="Demo Estate" /></label>
+                <label>Block<input name="name" defaultValue="Block A" /></label>
+                <label>Planting year<input name="planting_year" type="number" defaultValue="2018" /></label>
+                <label>Palm spacing m<input name="palm_spacing_m" type="number" step="0.1" defaultValue="9" /></label>
+                <label>Target palms/ha<input name="target_palms_ha" type="number" defaultValue="136" /></label>
+                <button>Create Block</button>
+              </form>
+              <form className="panel form-grid" onSubmit={createMission}>
+                <h2>Plan Mission</h2>
+                <label>Mission type<select name="mission_type"><option value="inventory">Inventory</option><option value="inspection">Inspection</option><option value="repeat">Repeat monitoring</option></select></label>
+                <label>Pilot<input name="pilot" defaultValue="Pilot" /></label>
+                <label>Drone<input name="drone_name" defaultValue="DJI Mini 5 Pro" /></label>
+                <label className="wide">Route notes<textarea name="route_notes" defaultValue="50MP nadir photos, 80/70 overlap, repeatable waypoint route." /></label>
+                <button>Save Mission</button>
+              </form>
+            </div>
+            <div className="two-col">
+              <form className="panel form-grid" onSubmit={importMissionPlan}>
+                <h2>Import KMZ Mission</h2>
+                <label className="wide file-input">Mission file<input name="file" type="file" accept=".kmz,.kml,.wpml,.zip" /></label>
+                <p className="wide">Imports DJI KMZ/KML/WPML route details such as waypoints, speed, altitude, route distance, and estimated coverage.</p>
+                <button disabled={missionImporting}>{missionImporting ? "Importing..." : "Import Mission File"}</button>
+              </form>
+              <div className="panel mission-summary-panel">
+                <h2>Imported Mission Details</h2>
+                {missionImportSummary ? (
+                  <div className="mission-summary-grid">
+                    <article><span>Waypoints</span><strong>{formatKpiValue(missionImportSummary.waypoint_count)}</strong></article>
+                    <article><span>Coverage</span><strong>{missionImportSummary.coverage_area_ha ? `${formatKpiValue(missionImportSummary.coverage_area_ha)} ha` : "-"}</strong></article>
+                    <article><span>Distance</span><strong>{missionImportSummary.route_distance_m ? `${formatKpiValue(missionImportSummary.route_distance_m)} m` : "-"}</strong></article>
+                    <article><span>Avg speed</span><strong>{missionImportSummary.avg_speed_m_s ? `${formatKpiValue(missionImportSummary.avg_speed_m_s)} m/s` : "-"}</strong></article>
+                    <article><span>Avg height</span><strong>{missionImportSummary.avg_height_m ? `${formatKpiValue(missionImportSummary.avg_height_m)} m` : "-"}</strong></article>
+                    <article><span>Coverage basis</span><strong>{missionImportSummary.coverage_basis || "-"}</strong></article>
+                  </div>
+                ) : (
+                  <p>Upload a route file to inspect mission speed, coverage, waypoints, height, and path distance.</p>
+                )}
+              </div>
+            </div>
           </section>
         )}
 
@@ -1298,8 +1682,14 @@ function App() {
                   {!cogs.length && <p>No orthomosaic overlays yet.</p>}
                 </div>
               </CollapseCard>
-              <CollapseCard title="Canopy boxes" meta={detectionCount} open={mapSections.detections} onToggle={() => toggleMapSection("detections")}>
+              <CollapseCard title="Canopy boxes" meta={mapOverlayLoading ? "Loading" : detectionCount} open={mapSections.detections} onToggle={() => toggleMapSection("detections")}>
                 <div className="overlay-list">
+                  {mapOverlayLoading && (
+                    <div className="map-loading-note">
+                      <i />
+                      <span>Loading canopy boxes for the selected stitched layer...</span>
+                    </div>
+                  )}
                   <label className="overlay-check">
                     <input type="checkbox" checked={showDetectionBoxes} onChange={(event) => setShowDetectionBoxes(event.target.checked)} />
                     <span>Show bounding boxes</span>
@@ -1329,8 +1719,8 @@ function App() {
               </CollapseCard>
               <CollapseCard title="Map actions" meta={`${cogLayers.length} visible`} open={mapSections.actions} onToggle={() => toggleMapSection("actions")}>
                 <div className="map-layer-note">
-                  <strong>{cogLayers.length}</strong>
-                  <span>{cogLayers.length === 1 ? "overlay visible" : "overlays visible"}</span>
+                  <strong>{mappedAreaHa ? formatKpiValue(mappedAreaHa) : "-"}</strong>
+                  <span>mapped hectares from {cogLayers.length === 1 ? "selected overlay" : `${cogLayers.length} overlays`}</span>
                 </div>
                 <div className="map-action-grid">
                   <button disabled={mapLoading} onClick={zoomToSelectedArea}>{mapLoading ? "Loading..." : "Zoom To Selected Area"}</button>
@@ -1378,19 +1768,28 @@ function App() {
               {!cogs.length && !treeCount && <p>No map layers for this block yet. Select the block with a completed stitch job or run inference.</p>}
               {!cogs.length && !treeCount && latestStitchedMap && <button className="secondary-action" disabled={mapLoading} onClick={() => openStitchJobOnMap(latestStitchedMap)}>{mapLoading ? "Opening..." : "Open Latest Orthomosaic"}</button>}
             </aside>
-            <MapPanel
-              trees={trees}
-              detections={filteredDetections}
-              showDetectionBoxes={showDetectionBoxes}
-              showTreePoints={false}
-              cogSource={cogSource}
-              cogBounds={cogBounds}
-              cogLayers={cogLayers}
-              cogBoundsList={cogBoundsList}
-              zoomRequest={mapZoomRequest}
-              locateRequest={locateRequest}
-              onLocateError={(error) => setMessage(`Location failed: ${error}`)}
-            />
+            <div className="map-stage">
+              {mapOverlayLoading && (
+                <div className="map-overlay-loader">
+                  <i />
+                  <strong>Loading canopy boxes</strong>
+                  <span>The stitched map is ready. Detection boxes are being filtered for the selected layer.</span>
+                </div>
+              )}
+              <MapPanel
+                trees={trees}
+                detections={filteredDetections}
+                showDetectionBoxes={showDetectionBoxes}
+                showTreePoints={false}
+                cogSource={cogSource}
+                cogBounds={cogBounds}
+                cogLayers={cogLayers}
+                cogBoundsList={cogBoundsList}
+                zoomRequest={mapZoomRequest}
+                locateRequest={locateRequest}
+                onLocateError={(error) => setMessage(`Location failed: ${error}`)}
+              />
+            </div>
           </section>
         )}
 

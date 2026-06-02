@@ -80,6 +80,7 @@ def detections_geojson(
     db: Annotated[Session, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
     block_id: str | None = None,
+    asset_id: str | None = None,
     health: HealthClass | None = None,
     job_id: str | None = None,
 ) -> dict:
@@ -88,6 +89,9 @@ def detections_geojson(
     if block_id:
         clauses.append("d.block_id = :block_id")
         params["block_id"] = block_id
+    if asset_id:
+        clauses.append("d.asset_id = :asset_id")
+        params["asset_id"] = asset_id
     if health:
         clauses.append("d.health_class = :health")
         params["health"] = health.value
@@ -207,7 +211,7 @@ def cog_tilejson(
     bounds = None
     center = None
     try:
-        response = httpx.get(internal_tilejson_url, timeout=10.0)
+        response = httpx.get(internal_tilejson_url, timeout=2.0)
         response.raise_for_status()
         tilejson = response.json()
         bounds = tilejson.get("bounds")

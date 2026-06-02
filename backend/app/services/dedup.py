@@ -26,8 +26,13 @@ def deduplicate_job(db: Session, job_id: str, eps_m: float = 3.0) -> int:
                 array_agg(d.id ORDER BY d.confidence DESC) AS detection_ids,
                 ST_Y(ST_Transform(ST_Centroid(ST_Collect(ST_Transform(d.geom, 3857))), 4326)) AS lat,
                 ST_X(ST_Transform(ST_Centroid(ST_Collect(ST_Transform(d.geom, 3857))), 4326)) AS lon,
-                mode() WITHIN GROUP (ORDER BY d.health_class) AS health_class,
-                avg(d.confidence) AS confidence,
+                CASE
+                    WHEN avg(d.canopy_area_m2) IS NULL THEN (array_agg(d.health_class ORDER BY d.confidence DESC, d.id))[1]
+                    WHEN sqrt(4 * avg(d.canopy_area_m2) / pi()) < 6.0 THEN 'small_canopy'
+                    WHEN sqrt(4 * avg(d.canopy_area_m2) / pi()) >= 10.0 THEN 'large_canopy'
+                    ELSE 'medium_canopy'
+                END AS health_class,
+                max(d.confidence) AS confidence,
                 avg(d.canopy_area_m2) AS canopy_area_m2,
                 avg(d.vari) AS vari,
                 avg(d.lai_estimate) AS lai_estimate

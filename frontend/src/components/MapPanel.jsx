@@ -3,11 +3,10 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 const { useEffect, useRef, useState } = React;
-const HEALTH_COLORS = {
-  healthy: "#16a34a",
-  small_young: "#eab308",
-  yellow_stressed: "#f97316",
-  dead: "#dc2626",
+const CANOPY_COLORS = {
+  small_canopy: "#eab308",
+  medium_canopy: "#16a34a",
+  large_canopy: "#2563eb",
 };
 
 export default function MapPanel({
@@ -81,14 +80,12 @@ export default function MapPanel({
           "circle-color": [
             "match",
             ["get", "health_class"],
-            "healthy",
-            HEALTH_COLORS.healthy,
-            "small_young",
-            HEALTH_COLORS.small_young,
-            "yellow_stressed",
-            HEALTH_COLORS.yellow_stressed,
-            "dead",
-            HEALTH_COLORS.dead,
+            "small_canopy",
+            CANOPY_COLORS.small_canopy,
+            "medium_canopy",
+            CANOPY_COLORS.medium_canopy,
+            "large_canopy",
+            CANOPY_COLORS.large_canopy,
             "#2563eb",
           ],
           "circle-stroke-width": 1.5,
@@ -128,16 +125,14 @@ export default function MapPanel({
     if (!map || !mapReady) return;
     const visibility = showDetectionBoxes ? "visible" : "none";
     const paintColor = [
-      "match",
-      ["get", "health_class"],
-      "healthy",
-      HEALTH_COLORS.healthy,
-      "small_young",
-      HEALTH_COLORS.small_young,
-      "yellow_stressed",
-      HEALTH_COLORS.yellow_stressed,
-      "dead",
-      HEALTH_COLORS.dead,
+            "match",
+            ["get", "health_class"],
+      "small_canopy",
+      CANOPY_COLORS.small_canopy,
+      "medium_canopy",
+      CANOPY_COLORS.medium_canopy,
+      "large_canopy",
+      CANOPY_COLORS.large_canopy,
       "#2563eb",
     ];
     if (!map.getSource("detections")) {

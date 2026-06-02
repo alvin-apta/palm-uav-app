@@ -1,4 +1,5 @@
 const API_BASE_URL = resolvePublicUrl(import.meta.env.VITE_API_BASE_URL || "http://localhost:8080", "8090");
+const TITILER_PROXY_PREFIX = "/titiler";
 
 function resolvePublicUrl(configuredUrl, publicPort) {
   if (typeof window === "undefined") return configuredUrl;
@@ -8,9 +9,7 @@ function resolvePublicUrl(configuredUrl, publicPort) {
   try {
     const url = new URL(configuredUrl);
     if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
-      url.hostname = currentHost;
-      url.port = publicPort;
-      return url.toString().replace(/\/$/, "");
+      return "/api";
     }
   } catch {
     return configuredUrl;
@@ -21,6 +20,15 @@ function resolvePublicUrl(configuredUrl, publicPort) {
 
 export function apiBaseUrl() {
   return API_BASE_URL;
+}
+
+export function publicAssetUrl(url) {
+  if (!url || typeof url !== "string" || typeof window === "undefined") return url;
+  if (!url.startsWith(TITILER_PROXY_PREFIX)) return url;
+  if (window.location.port !== "5173") return url;
+
+  const path = url.slice(TITILER_PROXY_PREFIX.length) || "/";
+  return `${window.location.protocol}//${window.location.hostname}:8082${path}`;
 }
 
 export async function login(email, password) {

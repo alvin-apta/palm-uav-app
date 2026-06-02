@@ -14,8 +14,8 @@ from app.services.geojson import feature_collection
 router = APIRouter(prefix="/spatial", tags=["spatial"])
 
 
-@router.get("/unhealthy-near-roads")
-def unhealthy_near_roads(
+@router.get("/small-canopy-near-roads")
+def small_canopy_near_roads(
     db: Annotated[Session, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
     block_id: str,
@@ -29,7 +29,7 @@ def unhealthy_near_roads(
             FROM trees t
             JOIN access_roads r ON r.block_id = t.block_id
             WHERE t.block_id = :block_id
-              AND t.health_class IN ('yellow_stressed', 'dead')
+              AND t.health_class = 'small_canopy'
               AND ST_DWithin(t.geom::geography, r.geom::geography, :distance_m)
             ORDER BY t.confidence DESC
             """
@@ -52,4 +52,3 @@ def unhealthy_near_roads(
             for row in rows
         ]
     )
-

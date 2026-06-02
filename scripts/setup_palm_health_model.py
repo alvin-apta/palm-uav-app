@@ -10,25 +10,24 @@ from pathlib import Path
 WORKSPACE = "oil-palm-health-detection"
 PROJECT = "oil-palm-tree-health-detection"
 VERSION = 1
-TARGET_NAMES = ["healthy", "yellow_stressed", "small_young", "dead"]
+TARGET_NAMES = ["palm_canopy"]
 CLASS_MAP = {
-    "healthy": "healthy",
-    "healthy_palm": "healthy",
-    "yellow": "yellow_stressed",
-    "yellowish": "yellow_stressed",
-    "yellowish_palm": "yellow_stressed",
-    "yellow_stressed": "yellow_stressed",
-    "small": "small_young",
-    "smallish": "small_young",
-    "smallish_palm": "small_young",
-    "small_young": "small_young",
-    "immature": "small_young",
-    "stressed": "yellow_stressed",
-    "dead": "dead",
-    "dead_palm": "dead",
-    # The Roboflow Universe dataset exposes "unhealthy" but not a literal "dead"
-    # label. Use it as the app's severe/dead bucket for local starter training.
-    "unhealthy": "dead",
+    "5": "palm_canopy",
+    "healthy": "palm_canopy",
+    "healthy_palm": "palm_canopy",
+    "yellow": "palm_canopy",
+    "yellowish": "palm_canopy",
+    "yellowish_palm": "palm_canopy",
+    "yellow_stressed": "palm_canopy",
+    "small": "palm_canopy",
+    "smallish": "palm_canopy",
+    "smallish_palm": "palm_canopy",
+    "small_young": "palm_canopy",
+    "immature": "palm_canopy",
+    "stressed": "palm_canopy",
+    "dead": "palm_canopy",
+    "dead_palm": "palm_canopy",
+    "unhealthy": "palm_canopy",
 }
 
 
@@ -63,7 +62,7 @@ def main() -> None:
             )
         dataset_dir = download_dataset(args.roboflow_api_key, Path(args.dataset_dir))
         data_yaml = remap_dataset(dataset_dir)
-    print(f"Prepared 4-class dataset: {data_yaml}")
+    print(f"Prepared palm-canopy dataset: {data_yaml}")
     if args.download_only:
         return
     best_weights = train_yolo(args, data_yaml)
@@ -71,7 +70,7 @@ def main() -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(best_weights, output)
     validate_weights(output)
-    print(f"Palm health YOLO model saved to {output}")
+    print(f"Palm canopy YOLO model saved to {output}")
 
 
 def download_dataset(api_key: str, dataset_dir: Path) -> Path:
@@ -80,11 +79,11 @@ def download_dataset(api_key: str, dataset_dir: Path) -> Path:
     except ImportError as exc:
         raise SystemExit("Install Roboflow first: pip install roboflow") from exc
 
-    dataset_dir.mkdir(parents=True, exist_ok=True)
+    dataset_dir.parent.mkdir(parents=True, exist_ok=True)
     rf = Roboflow(api_key=api_key)
     project = rf.workspace(WORKSPACE).project(PROJECT)
     version = project.version(VERSION)
-    dataset = version.download("yolov8", location=str(dataset_dir))
+    dataset = version.download("yolov8", location=str(dataset_dir), overwrite=True)
     return Path(dataset.location)
 
 
@@ -113,9 +112,9 @@ def remap_dataset(dataset_dir: Path) -> Path:
         if target_name:
             source_to_target[index] = TARGET_NAMES.index(target_name)
 
-    if len(set(source_to_target.values())) < len(TARGET_NAMES):
+    if not source_to_target:
         raise SystemExit(
-            f"Dataset class names do not include all required classes. Found names: {source_names}; "
+            f"Dataset class names do not include any usable palm canopy classes. Found names: {source_names}; "
             f"mapped indexes: {source_to_target}"
         )
 

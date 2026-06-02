@@ -23,7 +23,7 @@ def upgrade() -> None:
         END $$;
         DO $$
         BEGIN
-            CREATE TYPE healthclass AS ENUM ('healthy', 'yellow_stressed', 'small_young', 'dead');
+            CREATE TYPE healthclass AS ENUM ('small_canopy', 'medium_canopy', 'large_canopy');
         EXCEPTION WHEN duplicate_object THEN NULL;
         END $$;
         DO $$
@@ -40,7 +40,7 @@ def upgrade() -> None:
     )
 
     user_role = postgresql.ENUM("owner", "manager", "operator", name="userrole", create_type=False)
-    health_class = postgresql.ENUM("healthy", "yellow_stressed", "small_young", "dead", name="healthclass", create_type=False)
+    health_class = postgresql.ENUM("small_canopy", "medium_canopy", "large_canopy", name="healthclass", create_type=False)
     asset_type = postgresql.ENUM("photo", "cog", "dsm", "dtm", "road", name="assettype", create_type=False)
     job_status = postgresql.ENUM("queued", "running", "complete", "failed", name="jobstatus", create_type=False)
 

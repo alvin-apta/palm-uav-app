@@ -26,3 +26,7 @@ class MissionRead(OrmModel):
     planned_at: datetime | None
     created_at: datetime
 
+
+class MissionImportRead(BaseModel):
+    mission: MissionRead
+    summary: dict

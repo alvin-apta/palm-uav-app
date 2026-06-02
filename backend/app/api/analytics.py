@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -33,6 +33,8 @@ def block_summary(
     avg_vari = db.scalar(select(func.avg(Tree.vari)).where(Tree.block_id == block_id))
     avg_confidence = db.scalar(select(func.avg(Tree.confidence)).where(Tree.block_id == block_id))
     estimated_ffb_per_tree = estimate_ffb_kg(float(avg_diameter), float(avg_lai)) if avg_diameter and avg_lai else None
+    block_area_ha = _block_area_ha(db, block_id)
+    expected_palms = (float(block.target_palms_ha) * block_area_ha) if block.target_palms_ha and block_area_ha else None
     photos = list(
         db.scalars(
             select(ImageryAsset)
@@ -85,27 +87,41 @@ def block_summary(
     failed_inference_count = sum(1 for job in inference_jobs if job.status == JobStatus.failed)
     completed_inference_count = sum(1 for job in inference_jobs if job.status == JobStatus.complete)
     latest_run_elapsed = _run_elapsed_seconds(latest_run_jobs)
+    planted_fullness_pct = min(100.0, (total / expected_palms) * 100) if expected_palms else None
+    not_planted_pct = max(0.0, 100.0 - planted_fullness_pct) if planted_fullness_pct is not None else None
+    not_planted_area_ha = (block_area_ha * (not_planted_pct / 100.0)) if block_area_ha and not_planted_pct is not None else None
+    small_canopy_inspection_area_ha = (block_area_ha * (counts.get("small_canopy", 0) / total)) if block_area_ha and total else None
+    inspection_area_ha = (
+        (not_planted_area_ha or 0.0) + (small_canopy_inspection_area_ha or 0.0)
+        if block_area_ha and (not_planted_area_ha is not None or small_canopy_inspection_area_ha is not None)
+        else None
+    )
     insights = _build_insights(
         photo_count=len(photos),
         gps_count=gps_count,
         tree_total=total,
-        unhealthy_count=counts.get("yellow_stressed", 0) + counts.get("dead", 0),
-        dead_count=counts.get("dead", 0),
+        small_canopy_count=counts.get("small_canopy", 0),
+        large_canopy_count=counts.get("large_canopy", 0),
         cogs_count=len(cogs),
         latest_run_jobs=latest_run_jobs,
         failed_stitch_count=failed_stitch_count,
         latest_inference=latest_inference,
+        block_area_ha=block_area_ha,
+        inspection_area_ha=inspection_area_ha,
+        not_planted_pct=not_planted_pct,
     )
 
     return {
         "block_id": block.id,
         "block_name": block.name,
         "population_count": total,
+        "canopy_counts": counts,
         "health_counts": counts,
-        "unhealthy_count": counts.get("yellow_stressed", 0) + counts.get("dead", 0),
-        "unhealthy_pct": round(((counts.get("yellow_stressed", 0) + counts.get("dead", 0)) / total) * 100, 1) if total else 0,
-        "dead_count": counts.get("dead", 0),
-        "young_count": counts.get("small_young", 0),
+        "small_canopy_count": counts.get("small_canopy", 0),
+        "medium_canopy_count": counts.get("medium_canopy", 0),
+        "large_canopy_count": counts.get("large_canopy", 0),
+        "small_canopy_pct": round((counts.get("small_canopy", 0) / total) * 100, 1) if total else 0,
+        "large_canopy_pct": round((counts.get("large_canopy", 0) / total) * 100, 1) if total else 0,
         "average_canopy_diameter_m": round(float(avg_diameter), 3) if avg_diameter else None,
         "average_lai": round(float(avg_lai), 3) if avg_lai else None,
         "average_vari": round(float(avg_vari), 3) if avg_vari else None,
@@ -113,6 +129,16 @@ def block_summary(
         "estimated_ffb_kg_per_tree": round(float(estimated_ffb_per_tree), 2) if estimated_ffb_per_tree else None,
         "estimated_total_ffb_kg": round(float(estimated_ffb_per_tree) * total, 2) if estimated_ffb_per_tree else None,
         "forecast_note": "FFB estimate is advisory until calibrated with harvest records.",
+        "area": {
+            "block_area_ha": round(block_area_ha, 3) if block_area_ha else None,
+            "target_palms_ha": round(float(block.target_palms_ha), 2) if block.target_palms_ha else None,
+            "expected_palms": round(expected_palms, 1) if expected_palms else None,
+            "planted_fullness_pct": round(planted_fullness_pct, 1) if planted_fullness_pct is not None else None,
+            "not_planted_pct": round(not_planted_pct, 1) if not_planted_pct is not None else None,
+            "not_planted_area_ha": round(not_planted_area_ha, 3) if not_planted_area_ha is not None else None,
+            "small_canopy_inspection_area_ha": round(small_canopy_inspection_area_ha, 3) if small_canopy_inspection_area_ha is not None else None,
+            "inspection_area_ha": round(inspection_area_ha, 3) if inspection_area_ha is not None else None,
+        },
         "imagery": {
             "photo_count": len(photos),
             "gps_count": gps_count,
@@ -162,17 +188,34 @@ def _run_elapsed_seconds(jobs: list[OrthomosaicJob]) -> int | None:
     return max(0, int((max(ends) - min(starts)).total_seconds()))
 
 
+def _block_area_ha(db: Session, block_id: str) -> float | None:
+    area = db.scalar(
+        text(
+            """
+            SELECT ST_Area(boundary::geography) / 10000.0
+            FROM blocks
+            WHERE id = :block_id AND boundary IS NOT NULL
+            """
+        ),
+        {"block_id": block_id},
+    )
+    return float(area) if area else None
+
+
 def _build_insights(
     *,
     photo_count: int,
     gps_count: int,
     tree_total: int,
-    unhealthy_count: int,
-    dead_count: int,
+    small_canopy_count: int,
+    large_canopy_count: int,
     cogs_count: int,
     latest_run_jobs: list[OrthomosaicJob],
     failed_stitch_count: int,
     latest_inference: InferenceJob | None,
+    block_area_ha: float | None,
+    inspection_area_ha: float | None,
+    not_planted_pct: float | None,
 ) -> list[str]:
     insights: list[str] = []
     if photo_count and gps_count < photo_count:
@@ -193,10 +236,16 @@ def _build_insights(
     elif latest_inference and latest_inference.status == JobStatus.failed:
         insights.append(f"Latest AI inference failed: {latest_inference.error_code or 'unknown error'}.")
     if tree_total:
-        if dead_count:
-            insights.append(f"{dead_count} dead palms detected; prioritize field verification and replanting checks.")
-        if unhealthy_count:
-            insights.append(f"{unhealthy_count} palms need attention based on current health classification.")
+        if inspection_area_ha:
+            insights.append(f"{inspection_area_ha:.2f} ha should be inspected for missing palms or suppressed canopy.")
+        if not_planted_pct:
+            insights.append(f"{not_planted_pct:.1f}% of the expected planting capacity is not currently mapped as planted.")
+        if small_canopy_count:
+            insights.append(f"{small_canopy_count} palms have small canopies; inspect young, missing, or suppressed palms in the field.")
+        if large_canopy_count:
+            insights.append(f"{large_canopy_count} palms have large canopies; check spacing and crown overlap in dense areas.")
+    elif block_area_ha:
+        insights.append("Block boundary exists, but no palms are mapped yet; run inference to estimate planted fullness.")
     if failed_stitch_count and not cogs_count:
         insights.append("No usable map layer yet; retry a unified low-memory stitch before using partial batches.")
     return insights[:8]

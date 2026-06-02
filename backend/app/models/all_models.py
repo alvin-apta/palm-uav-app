@@ -34,10 +34,9 @@ class UserRole(str, enum.Enum):
 
 
 class HealthClass(str, enum.Enum):
-    healthy = "healthy"
-    yellow_stressed = "yellow_stressed"
-    small_young = "small_young"
-    dead = "dead"
+    small_canopy = "small_canopy"
+    medium_canopy = "medium_canopy"
+    large_canopy = "large_canopy"
 
 
 class AssetType(str, enum.Enum):

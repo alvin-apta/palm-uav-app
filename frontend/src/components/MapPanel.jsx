@@ -12,14 +12,17 @@ const CANOPY_COLORS = {
 export default function MapPanel({
   trees,
   detections = { type: "FeatureCollection", features: [] },
+  areaPolygons = { type: "FeatureCollection", features: [] },
   showDetectionBoxes = true,
   showTreePoints = false,
+  drawingArea = false,
   cogSource,
   cogBounds,
   cogLayers = [],
   cogBoundsList = [],
   zoomRequest = 0,
   locateRequest = 0,
+  onDrawPolygon,
   onLocateError,
 }) {
   const mapRef = useRef(null);
@@ -27,6 +30,7 @@ export default function MapPanel({
   const locationMarkerRef = useRef(null);
   const hoverPopupRef = useRef(null);
   const cogLayerIdsRef = useRef([]);
+  const draftAreaRef = useRef([]);
   const [mapReady, setMapReady] = useState(false);
 
   useEffect(() => {
@@ -216,6 +220,127 @@ export default function MapPanel({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
+    const fillColor = [
+      "match",
+      ["get", "dominant_health_class"],
+      "small_canopy",
+      "#eab308",
+      "medium_canopy",
+      "#16a34a",
+      "large_canopy",
+      "#2563eb",
+      "#64748b",
+    ];
+    if (!map.getSource("area-polygons")) {
+      map.addSource("area-polygons", { type: "geojson", data: areaPolygons });
+      map.addLayer({
+        id: "area-polygon-fill",
+        type: "fill",
+        source: "area-polygons",
+        paint: {
+          "fill-color": fillColor,
+          "fill-opacity": 0.22,
+        },
+      });
+      map.addLayer({
+        id: "area-polygon-line",
+        type: "line",
+        source: "area-polygons",
+        paint: {
+          "line-color": fillColor,
+          "line-width": 2.5,
+        },
+      });
+      const showAreaPopup = (event) => {
+        const feature = event.features?.[0];
+        if (!feature) return;
+        const props = feature.properties || {};
+        new maplibregl.Popup()
+          .setLngLat(event.lngLat)
+          .setHTML(
+            `<strong>${props.name || "Area"}</strong><br/>Palms: ${props.tree_count || 0}<br/>Dominant: ${String(props.dominant_health_class || "-").replaceAll("_", " ")}<br/>Area: ${props.area_ha || 0} ha`
+          )
+          .addTo(map);
+      };
+      ["area-polygon-fill", "area-polygon-line"].forEach((layerId) => {
+        map.on("click", layerId, showAreaPopup);
+        map.on("mouseenter", layerId, () => {
+          map.getCanvas().style.cursor = "pointer";
+        });
+        map.on("mouseleave", layerId, () => {
+          map.getCanvas().style.cursor = drawingArea ? "crosshair" : "";
+        });
+      });
+    } else {
+      map.getSource("area-polygons").setData(areaPolygons);
+    }
+  }, [areaPolygons, drawingArea, mapReady]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    if (!map.getSource("draft-area")) {
+      map.addSource("draft-area", { type: "geojson", data: emptyFeatureCollection() });
+      map.addLayer({
+        id: "draft-area-line",
+        type: "line",
+        source: "draft-area",
+        paint: {
+          "line-color": "#dc2626",
+          "line-width": 2,
+          "line-dasharray": [2, 1],
+        },
+      });
+      map.addLayer({
+        id: "draft-area-points",
+        type: "circle",
+        source: "draft-area",
+        paint: {
+          "circle-radius": 5,
+          "circle-color": "#dc2626",
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 1.5,
+        },
+      });
+    }
+    const updateDraft = () => {
+      map.getSource("draft-area")?.setData(draftFeatureCollection(draftAreaRef.current));
+    };
+    if (!drawingArea) {
+      draftAreaRef.current = [];
+      updateDraft();
+      map.getCanvas().style.cursor = "";
+      map.doubleClickZoom.enable();
+      return undefined;
+    }
+    map.getCanvas().style.cursor = "crosshair";
+    map.doubleClickZoom.disable();
+    const addVertex = (event) => {
+      draftAreaRef.current = [...draftAreaRef.current, [event.lngLat.lng, event.lngLat.lat]];
+      updateDraft();
+    };
+    const finishPolygon = (event) => {
+      event.preventDefault();
+      const coords = draftAreaRef.current;
+      if (coords.length < 3) return;
+      const ring = [...coords, coords[0]];
+      draftAreaRef.current = [];
+      updateDraft();
+      onDrawPolygon?.({ type: "Polygon", coordinates: [ring] });
+    };
+    map.on("click", addVertex);
+    map.on("dblclick", finishPolygon);
+    return () => {
+      map.off("click", addVertex);
+      map.off("dblclick", finishPolygon);
+      map.getCanvas().style.cursor = "";
+      map.doubleClickZoom.enable();
+    };
+  }, [drawingArea, mapReady, onDrawPolygon]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
     for (const id of cogLayerIdsRef.current) {
       if (map.getLayer(id)) map.removeLayer(id);
       if (map.getSource(id)) map.removeSource(id);
@@ -303,4 +428,24 @@ export default function MapPanel({
   }, [locateRequest, onLocateError]);
 
   return <div ref={containerRef} className="map-canvas" />;
+}
+
+function emptyFeatureCollection() {
+  return { type: "FeatureCollection", features: [] };
+}
+
+function draftFeatureCollection(coordinates) {
+  const features = coordinates.map((coordinate, index) => ({
+    type: "Feature",
+    geometry: { type: "Point", coordinates: coordinate },
+    properties: { index },
+  }));
+  if (coordinates.length >= 2) {
+    features.push({
+      type: "Feature",
+      geometry: { type: "LineString", coordinates },
+      properties: { draft: true },
+    });
+  }
+  return { type: "FeatureCollection", features };
 }

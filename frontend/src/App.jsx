@@ -4,9 +4,10 @@ import { apiBlob, apiFetch, apiUpload, login, publicAssetUrl } from "./api";
 import MapPanel from "./components/MapPanel";
 import "./styles.css";
 
-const { useEffect, useMemo, useState } = React;
+const { useCallback, useEffect, useMemo, useState } = React;
 const NAV = ["Home", "Dashboard", "Missions", "Upload Imagery", "Stitching", "Map", "Prescriptions", "Reports", "Admin"];
 const CANOPY_OPTIONS = ["small_canopy", "medium_canopy", "large_canopy"];
+const EMPTY_FEATURE_COLLECTION = { type: "FeatureCollection", features: [] };
 const ACTIVE_STITCH_STATUSES = new Set(["queued", "running"]);
 const PHOTO_FILE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".tif", ".tiff"]);
 const QUICK_STITCH_DEFAULTS = {
@@ -446,6 +447,9 @@ function App() {
   const [orthomosaicJobs, setOrthomosaicJobs] = useState([]);
   const [trees, setTrees] = useState({ type: "FeatureCollection", features: [] });
   const [detections, setDetections] = useState({ type: "FeatureCollection", features: [] });
+  const [areaPolygons, setAreaPolygons] = useState(EMPTY_FEATURE_COLLECTION);
+  const [areaDrawing, setAreaDrawing] = useState(false);
+  const [areaLoading, setAreaLoading] = useState(false);
   const [cogs, setCogs] = useState([]);
   const [cogSource, setCogSource] = useState(null);
   const [cogBounds, setCogBounds] = useState(null);
@@ -479,6 +483,7 @@ function App() {
   const [mapSections, setMapSections] = useState({
     overlays: false,
     detections: false,
+    areas: true,
     actions: false,
     inference: false,
     analytics: false,
@@ -530,6 +535,7 @@ function App() {
     [overlayFilteredDetections, selectedDetectionClasses]
   );
   const detectionCount = filteredDetections.features?.length || 0;
+  const areaPolygonCount = areaPolygons.features?.length || 0;
   const mappedAreaHa = useMemo(() => {
     const boundsList = cogBoundsList.length ? cogBoundsList : cogBounds ? [cogBounds] : [];
     return totalMappedAreaHa(boundsList);
@@ -633,6 +639,11 @@ function App() {
       setStitchPreviewCollapsed(false);
     }
   }, [currentBlockId, stitchPreview]);
+
+  useEffect(() => {
+    setAreaPolygons(EMPTY_FEATURE_COLLECTION);
+    setAreaDrawing(false);
+  }, [currentBlockId]);
 
   useEffect(() => {
     if (!token || active !== "Stitching" || !hasActiveStitchJob) return undefined;
@@ -1119,6 +1130,56 @@ function App() {
   function locateUser() {
     setMessage("Requesting browser location permission...");
     setLocateRequest((value) => value + 1);
+  }
+
+  async function generateAreaGrid() {
+    if (!currentBlockId) return;
+    setAreaLoading(true);
+    setMessage("Generating area summaries...");
+    try {
+      const grid = await apiFetch(`/spatial/block-area-grid?block_id=${currentBlockId}&cells=5`, token);
+      setAreaPolygons(grid);
+      setAreaDrawing(false);
+      setMessage(`Created ${grid.features?.length || 0} area summaries`);
+    } catch (error) {
+      setMessage(`Area grid failed: ${error.message}`);
+    } finally {
+      setAreaLoading(false);
+    }
+  }
+
+  const summarizeDrawnArea = useCallback(
+    async (geometry) => {
+      if (!currentBlockId || !token) return;
+      setAreaLoading(true);
+      setMessage("Summarizing drawn area...");
+      try {
+        const feature = await apiFetch("/spatial/area-summary", token, {
+          method: "POST",
+          body: JSON.stringify({
+            block_id: currentBlockId,
+            name: "Drawn area",
+            geometry,
+          }),
+        });
+        setAreaPolygons((collection) => ({
+          type: "FeatureCollection",
+          features: [...(collection.features || []), feature],
+        }));
+        setAreaDrawing(false);
+        setMessage(`Drawn area contains ${feature.properties?.tree_count || 0} palms`);
+      } catch (error) {
+        setMessage(`Area summary failed: ${error.message}`);
+      } finally {
+        setAreaLoading(false);
+      }
+    },
+    [currentBlockId, token],
+  );
+
+  function clearAreaPolygons() {
+    setAreaPolygons(EMPTY_FEATURE_COLLECTION);
+    setAreaDrawing(false);
   }
 
   async function loadStitchPreview(job) {
@@ -1722,6 +1783,40 @@ function App() {
                   <p>{detectionCount} visible boxes from {selectedCogAssetIds.length} selected overlay{selectedCogAssetIds.length === 1 ? "" : "s"}.</p>
                 </div>
               </CollapseCard>
+              <CollapseCard title="Area summaries" meta={areaLoading ? "Loading" : areaPolygonCount} open={mapSections.areas} onToggle={() => toggleMapSection("areas")}>
+                <div className="area-toolbox">
+                  <div className="map-action-grid">
+                    <button disabled={areaLoading || !currentBlockId} onClick={generateAreaGrid}>{areaLoading ? "Working..." : "Create 5 Grid Areas"}</button>
+                    <button className={areaDrawing ? "" : "secondary-action"} title="Click map vertices, then double-click to finish." disabled={areaLoading || !currentBlockId} onClick={() => setAreaDrawing((value) => !value)}>{areaDrawing ? "Drawing Active" : "Draw Area"}</button>
+                    <button className="secondary-action" disabled={!areaPolygonCount} onClick={clearAreaPolygons}>Clear Areas</button>
+                  </div>
+                  <div className="area-summary-list">
+                    {(areaPolygons.features || []).map((feature, index) => {
+                      const props = feature.properties || {};
+                      return (
+                        <article key={`${props.name || "area"}-${index}`} className="area-summary-card">
+                          <div>
+                            <strong>{props.name || `Area ${index + 1}`}</strong>
+                            <span>{formatKpiValue(props.area_ha)} ha</span>
+                          </div>
+                          <div className="area-summary-main">
+                            <span>Palms</span>
+                            <strong>{formatKpiValue(props.tree_count)}</strong>
+                            <span>Dominant</span>
+                            <strong>{props.dominant_health_class ? humanize(props.dominant_health_class) : "-"}</strong>
+                          </div>
+                          <div className="area-class-row">
+                            <span><i className="class-dot status-small_canopy" />{formatKpiValue(props.small_canopy_count)}</span>
+                            <span><i className="class-dot status-medium_canopy" />{formatKpiValue(props.medium_canopy_count)}</span>
+                            <span><i className="class-dot status-large_canopy" />{formatKpiValue(props.large_canopy_count)}</span>
+                          </div>
+                        </article>
+                      );
+                    })}
+                    {!areaPolygonCount && <p>No area summaries yet.</p>}
+                  </div>
+                </div>
+              </CollapseCard>
               <CollapseCard title="Map actions" meta={`${cogLayers.length} visible`} open={mapSections.actions} onToggle={() => toggleMapSection("actions")}>
                 <div className="map-layer-note">
                   <strong>{mappedAreaHa ? formatKpiValue(mappedAreaHa) : "-"}</strong>
@@ -1784,14 +1879,17 @@ function App() {
               <MapPanel
                 trees={trees}
                 detections={filteredDetections}
+                areaPolygons={areaPolygons}
                 showDetectionBoxes={showDetectionBoxes}
                 showTreePoints={false}
+                drawingArea={areaDrawing}
                 cogSource={cogSource}
                 cogBounds={cogBounds}
                 cogLayers={cogLayers}
                 cogBoundsList={cogBoundsList}
                 zoomRequest={mapZoomRequest}
                 locateRequest={locateRequest}
+                onDrawPolygon={summarizeDrawnArea}
                 onLocateError={(error) => setMessage(`Location failed: ${error}`)}
               />
             </div>

@@ -1606,6 +1606,81 @@ nav button:hover {
   gap: 8px;
 }
 
+.area-toolbox {
+  display: grid;
+  gap: 10px;
+}
+
+.area-summary-list {
+  display: grid;
+  max-height: 260px;
+  overflow-y: auto;
+  gap: 8px;
+  overscroll-behavior: contain;
+}
+
+.area-summary-card {
+  display: grid;
+  min-width: 0;
+  gap: 9px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.area-summary-card > div:first-child {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.area-summary-card strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.area-summary-card span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.area-summary-main {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px 8px;
+}
+
+.area-summary-main span {
+  text-transform: uppercase;
+}
+
+.area-summary-main strong {
+  font-size: 18px;
+}
+
+.area-class-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.area-class-row span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #e5edf7;
+  border-radius: 8px;
+  background: #f8fbff;
+  padding: 6px;
+}
+
 .map-subpanel h3 {
   margin: 0;
   font-size: 16px;
@@ -1851,6 +1926,8 @@ nav button:hover {
   .dashboard-charts.is-partial,
   .donut-layout,
   .bar-row,
+  .area-summary-main,
+  .area-class-row,
   nav,
   .table-row {
     grid-template-columns: 1fr;
